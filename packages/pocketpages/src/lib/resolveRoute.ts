@@ -160,8 +160,22 @@ const visit = (search: Search, node: RouteNode, depth: number) => {
 }
 
 const matchParts = (index: RouteIndex, parts: string[]): RouteMatch | null => {
+  // Most requests that get here are not for a page. Nothing at the root can match them
+  // when there is no [param] first segment and no route has the first segment of the
+  // path as its own, so there is nothing to search.
+  const { root } = index
+  if (!root.param && !root.routes) {
+    const first = parts[0]
+    if (
+      first === undefined ||
+      (!root.statics?.has(first) && !root.fingerprinted?.has(first))
+    ) {
+      return null
+    }
+  }
+
   const search: Search = { parts, best: undefined, fingerprinted: false }
-  visit(search, index.root, 0)
+  visit(search, root, 0)
   return search.best
     ? {
         route: search.best.route,
@@ -181,9 +195,11 @@ export const matchRoute = (
 ): RouteMatch | null => {
   const urlPath = pathname.slice(1)
   const first = urlPath || 'index'
-  const match = matchParts(index, splitPath(first))
+  const parts = splitPath(first)
+  const match = matchParts(index, parts)
   if (match || first === 'index') return match
-  return matchParts(index, splitPath(`${urlPath}/index`))
+  // `${urlPath}/index` splits into the same segments plus `index`
+  return matchParts(index, parts.concat('index'))
 }
 
 /**
