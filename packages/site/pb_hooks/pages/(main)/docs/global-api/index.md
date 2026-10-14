@@ -80,6 +80,15 @@ The Global API provides these core utility functions:
 
   - `env(key: string)` - Access environment variables
 
+- **Security**
+
+  - `secret(purpose: string)` - A key that belongs to your app, stable across restarts
+  - `sign(value: string)` / `unsign(signed: string)` - Signatures only your app can make
+
+- **Paths**
+
+  - `pathMatcher(patterns)` - A function that tells whether a URL path matches patterns like `/admin/**`
+
 - **Logging**
   - `dbg()` - Debug level logging
   - `info()` - Info level logging

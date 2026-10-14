@@ -2,6 +2,8 @@ import * as log from 'pocketbase-log'
 import { stringify } from 'pocketbase-stringify'
 import { default as parse } from 'url-parse'
 import { couldBeJson } from './json'
+import { pathMatcher } from './pathMatch'
+import { secret, sign, unsign } from './secret'
 import { PagesGlobalContext } from './types'
 
 export const globalApi: PagesGlobalContext = {
@@ -26,6 +28,10 @@ export const globalApi: PagesGlobalContext = {
   },
   stringify,
   env: (key: string) => process.env[key] ?? '',
+  secret,
+  sign,
+  unsign,
+  pathMatcher,
   store: (name: string, value?: any) => {
     if (value === undefined) {
       return $app.store<any>().get(name)

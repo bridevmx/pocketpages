@@ -68,6 +68,21 @@ response.html(200, '<h1>Hello World</h1>')
 %>
 ```
 
+### `text(status: number, data: string)`
+
+Sends plain text, or the type you set with `header('Content-Type', ...)`: XML, CSV, a robots.txt.
+
+```ejs
+<%%
+response.header('Content-Type', 'application/xml; charset=utf-8')
+response.text(200, '<?xml version="1.0"?><note>Hello</note>')
+%>
+```
+
+### `noContent(status?: number)`
+
+Sends only a status and the headers, `204` unless told otherwise. `304` is the other usual one, for browsers that already have the page.
+
 ### `header(name: string, value?: string)`
 
 Gets or sets a response header. If value is provided, sets the header. If value is omitted, returns the current header value.
@@ -80,6 +95,45 @@ response.header('X-Custom-Header', 'custom-value')
 
 // Get a header value
 const contentType = response.header('Content-Type')
+%>
+```
+
+### `addHeader(name: string, value: string)`
+
+Adds a header without replacing the ones with the same name already there, for headers that can be sent more than once (`Link`, `Vary`).
+
+```ejs
+<%%
+response.addHeader('Vary', 'Accept-Language')
+response.addHeader('Vary', 'Cookie')
+%>
+```
+
+### `status(code?: number)`
+
+The status the page is sent with, `200` unless you change it. Called without a code it only tells what it is now. A form that did not validate is a `422`, a record that isn't there a `404`:
+
+```ejs
+<%%
+if (!record) {
+  response.status(404)
+}
+%>
+```
+
+### `sent()`
+
+True once something has been written to the response: a redirect, `echo()`, a JSON response.
+
+### `beforeSend(callback: () => void)`
+
+Runs `callback` right before the response goes out. Cookies and headers can be set until then, so this is the place to set the ones that depend on what the page did (a session that changed while the page ran). Callbacks run once each, in the order they were added, also for requests that go on to PocketBase.
+
+```ejs
+<%%
+response.beforeSend(() => {
+  response.header('X-Rendered-At', new Date().toISOString())
+})
 %>
 ```
 
@@ -137,6 +191,10 @@ response.cookie<number[]>('recentItems', [1, 2, 3, 4, 5])
 ```
 
 Note: When reading these cookies back using `request.cookies<T>()`, the values will be automatically parsed back into their original type T.
+
+You can set as many cookies as you need in one response, they are all sent. Setting a cookie again with the same name replaces the one set before it, so `response.cookie('theme', 'dark')` followed by `response.cookie('theme', 'light')` sends `light`.
+
+Text that looks like JSON (`123`, `true`, `{...}`) is read as JSON by `request.cookies()`. If you want to be sure to get text back, start the value with a letter and a dot, as the plugins do: `v1.abc`.
 
 ## Example Usage
 

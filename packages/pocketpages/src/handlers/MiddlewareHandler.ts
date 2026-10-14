@@ -1,25 +1,30 @@
 import { forEach, merge } from '@s-libs/micro-dash'
-import type { SerializeOptions } from 'cookie'
 import * as cookie from 'cookie'
-import { error } from 'pocketbase-log'
-import { stringify } from 'pocketbase-stringify'
+import { error as logError } from 'pocketbase-log'
 import { fingerprint as applyFingerprint } from 'src/lib/fingerprint'
 import { globalApi } from 'src/lib/globalApi'
 import { getCache } from '../lib/cache'
 import { dbg, isDebug } from '../lib/debug'
+import {
+  describeError,
+  getErrorStatus,
+  prefersJson,
+  statusText,
+} from '../lib/errors'
 import { echo, mkMeta, mkResolve, pagesRoot } from '../lib/helpers'
 import { couldBeJson, tryParseJson } from '../lib/json'
 import { getPlugins } from '../lib/loadPlugins'
 import { applyPathParams, matchRoute, RouteMatch } from '../lib/resolveRoute'
+import { createResponse } from '../lib/response'
 import { parseSlots } from '../lib/slots'
 import {
+  ErrorContext,
   MiddlewareLoaderFunc,
   PagesMethods,
   PagesMiddlewareFunc,
   PagesNextFunc,
   PagesRequest,
   PagesRequestContext,
-  PagesResponse,
   Plugin,
   RedirectOptions,
   Url,
@@ -51,7 +56,7 @@ const defaultResponder: Plugin = {
   name: 'builtin',
   onResponse: ({ content, api, route }) => {
     const { response } = api
-    response.html(200, content)
+    response.html(response.status(), content)
     return true
   },
 }
@@ -84,7 +89,9 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
 
   const cache = getCache()
   const { config, index } = cache
-  const { plugins, hasOnRequest } = getPlugins(cache)
+  const loaded = getPlugins(cache)
+  const { plugins, hasOnRequest, requestHooks, afterRenderHooks, errorHooks } =
+    loaded
 
   const rawUrl = url.string()
   if (isDebug()) {
@@ -97,12 +104,14 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
    * no route claims goes straight back to PocketBase without building anything.
    */
   let pathname = quickPathname(rawUrl)
-  let match: RouteMatch | null | undefined =
-    pathname === undefined ? undefined : matchRoute(index, pathname)
-  if (match === null && !hasOnRequest) {
-    if (isDebug())
-      dbg(`No route matched for ${rawUrl}, passing on to PocketBase`)
-    return next()
+  let match: RouteMatch | null = null
+  if (pathname !== undefined) {
+    match = matchRoute(index, pathname)
+    if (match === null && !hasOnRequest) {
+      if (isDebug())
+        dbg(`No route matched for ${rawUrl}, passing on to PocketBase`)
+      return next()
+    }
   }
 
   /**
@@ -113,6 +122,19 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
     event: e,
     auth: e.auth,
     method: method.toUpperCase() as PagesMethods,
+    state: {},
+    get pathname() {
+      return parsedUrl ? parsedUrl.pathname : pathname!
+    },
+    get ip() {
+      return e.realIP()
+    },
+    get secure() {
+      return (
+        !!e.request?.tls ||
+        /^\s*https/i.test(e.request?.header.get('X-Forwarded-Proto') || '')
+      )
+    },
     get url() {
       if (!parsedUrl) {
         parsedUrl = globalApi.url(rawUrl)
@@ -156,50 +178,7 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
     })(),
   }
 
-  const response: PagesResponse = {
-    file: (path: string) => {
-      return e.fileFS($os.dirFS($filepath.dir(path)), $filepath.base(path))
-    },
-    write: (s: string) => {
-      e.response.write(s)
-    },
-    redirect: (path: string, status = 302) => {
-      e.redirect(status, path)
-    },
-    json: (status: number, data: any) => {
-      e.json(status, data)
-    },
-    html: (status: number, data: string) => {
-      e.html(status, data)
-    },
-    header: (name: string, value?: string) => {
-      if (value === undefined) {
-        return e.response.header().get(name) || ''
-      }
-      if (isDebug()) dbg(`header: ${name} ${value}`)
-      e.response.header().set(name, value)
-      return value
-    },
-    cookie: <T>(
-      name: string,
-      value: T,
-      options: Partial<SerializeOptions> = {}
-    ) => {
-      const _options = {
-        path: '/',
-        ...options,
-      }
-      const stringifiedValue = (() => {
-        if (typeof value !== 'string') {
-          return stringify(value)
-        }
-        return value
-      })()
-      const serialized = cookie.serialize(name, stringifiedValue, _options)
-      response.header(`Set-Cookie`, serialized)
-      return serialized
-    },
-  }
+  const { response, flush } = createResponse(e)
 
   if (pathname === undefined) {
     // Not a plain path, let the URL parser work out what it is
@@ -212,34 +191,62 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
     }
   }
 
-  if (hasOnRequest) {
-    plugins.forEach((plugin) =>
-      plugin.onRequest?.({
-        request,
-        response,
-        route: match ? match.route : null,
-      })
-    )
-    // A plugin may have rewritten the URL to send the request somewhere else
-    if (parsedUrl && parsedUrl.pathname !== pathname) {
-      match = matchRoute(index, parsedUrl.pathname)
+  /**
+   * Set once the plugins have been through the request, if there turns out to be nothing
+   * for PocketPages to serve
+   */
+  let passOn = false
+  /**
+   * The context API of the page being served, for the error hooks
+   */
+  let api: PagesRequestContext<any> | undefined
+
+  try {
+    if (hasOnRequest) {
+      for (let i = 0; i < requestHooks.length; i++) {
+        const answered = requestHooks[i]!.onRequest!({
+          request,
+          response,
+          route: match ? match.route : null,
+        })
+        // A plugin may have rewritten the URL to send the request somewhere else
+        if (parsedUrl && parsedUrl.pathname !== pathname) {
+          pathname = parsedUrl.pathname
+          match = matchRoute(index, pathname)
+        }
+        if (answered === true) {
+          if (isDebug()) dbg(`${requestHooks[i]!.name} answered the request`)
+          return
+        }
+      }
     }
+
+    /**
+     * If it doesn't match any known route, pass it on
+     */
+    if (!match) {
+      if (isDebug())
+        dbg(`No route matched for ${rawUrl}, passing on to PocketBase`)
+      passOn = true
+    } else {
+      serve(match)
+    }
+  } catch (err) {
+    return handleError(err)
   }
 
-  /**
-   * If it doesn't match any known route, pass it on
-   */
-  if (!match) {
-    // Otherwise, pass it on to PocketBase to handle
-    if (isDebug())
-      dbg(`No route matched for ${rawUrl}, passing on to PocketBase`)
+  if (passOn) {
+    // Not inside the try block: whatever goes wrong further down the chain is for
+    // PocketBase to deal with
+    // A callback may have sent the response itself
+    if (flush() && response.sent()) return
     return next()
   }
 
-  const { route } = match
-  const { absolutePath, relativePath } = route
+  function serve(match: RouteMatch) {
+    const { route } = match
+    const { absolutePath, relativePath } = route
 
-  try {
     /**
      * If the file exists but no plugin handles it, serve statically
      */
@@ -260,7 +267,7 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
     const params = request.url.query
     applyPathParams(match, params)
 
-    const api: PagesRequestContext<any> = {
+    const pageApi: PagesRequestContext<any> = (api = {
       ...globalApi,
       params,
       echo: (...args) => {
@@ -319,12 +326,24 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
       },
       meta: mkMeta(),
       resolve: mkResolve($filepath.dir(absolutePath)),
-    }
+    })
 
-    plugins.forEach((plugin) => plugin.onExtendContextApi?.({ api, route }))
+    plugins.forEach((plugin) =>
+      plugin.onExtendContextApi?.({ api: pageApi, route })
+    )
 
     let data = {}
     let idx = 0
+
+    /**
+     * A middleware or a loader that redirected has said all there is to say. Rendering
+     * the page now would only waste time and send its output after the redirect.
+     */
+    const redirected = () => {
+      if (!response.sent()) return false
+      const status = e.response.status?.() ?? 0
+      return status >= 300 && status < 400
+    }
 
     _next()
 
@@ -340,39 +359,53 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
 
       if (isDebug()) dbg(`Executing middleware ${maybeMiddleware}`)
       if (middlewareFn.length < 2) {
-        _next(middlewareFn({ ...api, data }))
+        const extra = middlewareFn({ ...pageApi, data })
+        if (redirected()) return
+        _next(extra)
       } else {
-        middlewareFn({ ...api, data }, _next)
+        middlewareFn({ ...pageApi, data }, _next)
       }
     }
 
     function done() {
-      // Execute loaders
+      // Execute loaders. Plugins may have changed the method, the way a form that
+      // can only POST asks for a DELETE.
       {
-        const methods = ['load', method.toLowerCase(), method]
+        const methods = ['load', request.method.toLowerCase(), request.method]
         forEach(methods, (method) => {
           const loaderFname =
             route.loaders[method as keyof typeof route.loaders]
-          if (!loaderFname) return
+          if (!loaderFname || redirected()) return
           if (isDebug()) dbg(`Executing loader ${loaderFname}`)
-          data = merge(data, require(loaderFname)({ ...api, data }))
+          data = merge(data, require(loaderFname)({ ...pageApi, data }))
         })
+        if (redirected()) {
+          if (isDebug()) dbg(`Redirected, not rendering ${relativePath}`)
+          return true
+        }
       }
 
-      api.data = data
+      pageApi.data = data
       // dbg(`Final api:`, { params: api.params, data: api.data })
 
       let content = plugins.reduce((content, plugin) => {
         return (
           plugin.onRender?.({
             content,
-            api,
+            api: pageApi,
             route,
             filePath: absolutePath,
             plugins,
           }) ?? content
         )
       }, '')
+
+      // A template cannot be stopped half way, but what it made is not sent after a
+      // redirect
+      if (redirected()) {
+        if (isDebug()) dbg(`Redirected while rendering ${relativePath}`)
+        return true
+      }
 
       // If the content type is not text/html, we don't need to parse it or render it in a layout
       const contentType = response.header('Content-Type')
@@ -387,7 +420,7 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
         try {
           if (isDebug()) dbg(`Attempting to parse as JSON`)
           const parsed = JSON.parse(content)
-          response.json(200, parsed)
+          response.json(response.status(), parsed)
           return true
         } catch (e) {
           if (isDebug()) dbg(`Not JSON`)
@@ -399,13 +432,13 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
        */
       route.layouts.forEach((layoutPath) => {
         const res = parseSlots(content)
-        api.slots = res.slots
-        api.slot = res.slots.default || res.content
+        pageApi.slots = res.slots
+        pageApi.slot = res.slots.default || res.content
         content = plugins.reduce((content, plugin) => {
           return (
             plugin.onRender?.({
               content,
-              api,
+              api: pageApi,
               route,
               filePath: layoutPath,
               plugins,
@@ -414,45 +447,111 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
         }, content)
       })
 
-      for (const plugin of [...plugins, defaultResponder]) {
-        if (plugin.onResponse?.({ content, api, route })) {
+      for (let i = 0; i < afterRenderHooks.length; i++) {
+        const result = afterRenderHooks[i]!.onAfterRender!({
+          content,
+          api: pageApi,
+          route,
+        })
+        if (typeof result === 'string') content = result
+      }
+
+      for (let i = 0; i < plugins.length; i++) {
+        if (plugins[i]!.onResponse?.({ content, api: pageApi, route })) {
           return
         }
       }
+      if (defaultResponder.onResponse!({ content, api: pageApi, route })) {
+        return
+      }
       throw new Error(`No plugin handled the response`)
     }
-  } catch (e) {
-    error(e)
+  }
 
-    if (e instanceof BadRequestError) {
-      const message = config.debug ? `${e}` : 'Bad Request'
-      return response.html(400, message)
+  /**
+   * Whatever went wrong while the request was handled: plugins get to answer first
+   */
+  function handleError(err: unknown) {
+    const status = getErrorStatus(err)
+    if (status >= 500) {
+      logError(err)
+    } else if (isDebug()) {
+      // PocketBase logs every request with its status already
+      dbg(`${status} while serving ${rawUrl}: ${describeError(err)}`)
+    }
+
+    const context: ErrorContext = {
+      error: err,
+      status,
+      request,
+      response,
+      route: match ? match.route : null,
+      api,
+    }
+    for (let i = 0; i < errorHooks.length; i++) {
+      try {
+        if (errorHooks[i]!.onError!(context) === true) return
+      } catch (hookError) {
+        logError(hookError)
+      }
+    }
+
+    try {
+      respondWithError(err, status)
+    } catch (sendError) {
+      // Something in the way of sending a response (a beforeSend callback...)
+      logError(sendError)
+      e.html(status, statusText(status))
+    }
+  }
+
+  function respondWithError(err: unknown, status: number) {
+    // Requests that are not for a page get what PocketBase answers with, and so do
+    // the clients that ask for JSON
+    const asJson = !match || prefersJson(request.header('Accept'))
+
+    if (status < 500) {
+      const message = config.debug ? describeError(err) : statusText(status)
+      if (asJson) {
+        return response.json(status, { status, message, data: {} })
+      }
+      return response.html(status, message)
     }
 
     // In production, don't leak error details or stack traces
     if (config.debug) {
       const message = (() => {
-        const m = `${e}`
+        const m = `${err}`
         if (m.includes('Value is not an object'))
           return `${m} - are you referencing a symbol missing from require() or resolve()?`
-        return `${e}`
+        return `${err}`
       })()
+      if (asJson) {
+        return response.json(status, { status, message, data: {} })
+      }
       const stackTrace =
-        e instanceof Error
-          ? e.stack
+        err instanceof Error
+          ? err.stack
               ?.replaceAll(pagesRoot, '/' + $filepath.base(pagesRoot))
               .replaceAll(__hooks, '')
           : ''
       return response.html(
-        500,
+        status,
         `<html><body><h1>PocketPages Error</h1><pre><code>${escapeXml(message)}\n${escapeXml(stackTrace)}</code></pre></body></html>`
       )
-    } else {
-      // Generic error message in production
-      return response.html(
-        500,
-        `<html><body><h1>Internal Server Error</h1><p>Something went wrong. Please try again later.</p></body></html>`
-      )
     }
+
+    // Generic error message in production
+    if (asJson) {
+      return response.json(status, {
+        status,
+        message: statusText(status),
+        data: {},
+      })
+    }
+    return response.html(
+      status,
+      `<html><body><h1>Internal Server Error</h1><p>Something went wrong. Please try again later.</p></body></html>`
+    )
   }
 }

@@ -1,96 +1,20 @@
 import { beforeEach, expect, test } from 'bun:test'
-import path from 'node:path'
+import { installGlobals, makeEvent, route, store } from './testkit'
+
+// The modules under test read PocketBase's globals when they load
+const { MiddlewareHandler } = await import('../handlers/MiddlewareHandler')
+const { publishCache } = await import('./cache')
 
 /**
  * Drives MiddlewareHandler with a fake PocketBase event, to check which requests it
  * lets through untouched, which ones it serves, and what plugins get to see.
  */
 
-const store = new Map<string, any>()
-let epoch = 0
-const g = globalThis as any
-g.$app = {
-  store: () => ({
-    get: (key: string) => store.get(key) ?? null,
-    set: (key: string, value: any) => store.set(key, value),
-  }),
-  isDev: () => false,
-  logger: () => ({ debug() {}, info() {}, warn() {}, error() {} }),
-}
-g.$security = { randomString: () => `epoch-${++epoch}` }
-g.$filepath = {
-  join: (...parts: string[]) => path.join(...parts),
-  dir: (p: string) => path.dirname(p),
-  base: (p: string) => path.basename(p),
-  ext: (p: string) => path.extname(p),
-  toSlash: (p: string) => p,
-}
-g.$os = { dirFS: (dir: string) => ({ dir }) }
-g.__hooks = '/hooks'
-g.BadRequestError = class BadRequestError extends Error {}
-
-const { MiddlewareHandler } = await import('../handlers/MiddlewareHandler')
-const { publishCache } = await import('./cache')
-
-const route = (relativePath: string, extra: Record<string, any> = {}) => {
-  const parts = relativePath.split('/')
-  return {
-    relativePath,
-    absolutePath: `/hooks/pages/${relativePath}`,
-    fingerprint: 'abc123',
-    assetPrefix: parts[parts.length - 2] ?? '',
-    segments: parts.map((nodeName) => ({ nodeName })),
-    isStatic: true,
-    middlewares: [],
-    loaders: {},
-    layouts: [],
-    ...extra,
-  }
-}
-
 const configure = (plugins: any[], routes: any[]) =>
   publishCache({ routes, config: { plugins, debug: false, cache: true } })
 
-const makeEvent = (rawUrl: string, method = 'GET') => {
-  const seen = {
-    next: 0,
-    html: [] as [number, string][],
-    files: [] as string[],
-    headers: {} as Record<string, string>,
-  }
-  const e: any = {
-    auth: null,
-    request: {
-      url: { string: () => rawUrl },
-      method,
-      header: { get: () => '' },
-    },
-    response: {
-      header: () => ({
-        get: (name: string) => seen.headers[name] ?? '',
-        set: (name: string, value: string) => {
-          seen.headers[name] = value
-        },
-      }),
-      write() {},
-    },
-    next: () => {
-      seen.next++
-    },
-    html: (status: number, body: string) => {
-      seen.html.push([status, body])
-    },
-    json() {},
-    redirect() {},
-    fileFS: (_fs: unknown, name: string) => {
-      seen.files.push(name)
-    },
-    requestInfo: () => ({ body: {} }),
-  }
-  return { e, seen }
-}
-
 beforeEach(() => {
+  installGlobals()
   store.clear()
 })
 

@@ -83,6 +83,10 @@ export type LoadedPlugins = {
   plugins: Plugin[]
   /** True when at least one plugin wants to see every request */
   hasOnRequest: boolean
+  /** The plugins that have each of the hooks called for requests, in order */
+  requestHooks: Plugin[]
+  afterRenderHooks: Plugin[]
+  errorHooks: Plugin[]
 }
 
 let loaded: LoadedPlugins | undefined
@@ -98,11 +102,19 @@ export const getPlugins = (cache: Cache): LoadedPlugins => {
     return loaded
   }
   const plugins = loadPlugins(cache)
+  const requestHooks = plugins.filter(
+    (plugin) => typeof plugin.onRequest === 'function'
+  )
   loaded = {
     cache,
     plugins,
-    hasOnRequest: plugins.some(
-      (plugin) => typeof plugin.onRequest === 'function'
+    hasOnRequest: requestHooks.length > 0,
+    requestHooks,
+    afterRenderHooks: plugins.filter(
+      (plugin) => typeof plugin.onAfterRender === 'function'
+    ),
+    errorHooks: plugins.filter(
+      (plugin) => typeof plugin.onError === 'function'
     ),
   }
   return loaded

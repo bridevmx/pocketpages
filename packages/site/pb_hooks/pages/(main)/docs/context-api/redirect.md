@@ -128,6 +128,12 @@ module.exports = ({ formData, redirect }) => {
 
 ## Important Notes
 
+0. **A redirect ends the request**
+
+   - Middleware and loaders that call `redirect()` stop everything after them: the loaders that would have run next and the page are not run
+   - A template can't be stopped half way, but what it made after the redirect isn't sent
+   - Calling `redirect()` from a function, return right after it if there is more code below that should not run
+
 1. **Flash Messages**
 
    - Are single-use (cleared after being displayed)

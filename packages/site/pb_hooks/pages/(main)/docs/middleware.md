@@ -127,6 +127,7 @@ Middleware supports an optional second argument: `next`.
   - Middleware will **not** proceed unless `next()` is called.
   - The page route will only be rendered if `next()` is called all the way through the chain.
   - If you return early (without calling `next()`), execution stops, no further middleware or loaders (`+load`, `+get`, etc) will run, no plugin `onRender` will be called, and **no response will be sent**. You must manually send a response, e.g. `response.json(400, { error: 'Forbidden' })`.
+  - Middleware that calls `redirect()` stops the request the same way, with or without `next`: nothing after it runs.
 
 ### Example with `next`
 

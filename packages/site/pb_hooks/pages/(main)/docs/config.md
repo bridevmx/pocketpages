@@ -133,7 +133,7 @@ module.exports = {
     // Format 3: Direct factory function
     (config, options) => ({
       onRequest(context) {
-        config.global.dbg('Request:', context.request.method)
+        config.globalApi.dbg('Request:', context.request.method)
       },
     }),
 
@@ -141,7 +141,7 @@ module.exports = {
     {
       fn: (config, options) => ({
         onRequest(context) {
-          config.global.dbg('Request:', context.request.method)
+          config.globalApi.dbg('Request:', context.request.method)
         },
       }),
       debug: false,
