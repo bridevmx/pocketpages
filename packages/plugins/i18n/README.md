@@ -1,0 +1,202 @@
+# PocketPages i18n Plugin
+
+Translations, plural forms and addresses for sites in more than one language.
+
+- **A language in the address**: `/about` in English, `/es/about` in Spanish. Pages are written once, the plugin takes the language off the address before PocketPages looks for the page.
+- **Translation files** in JSON, with variables and **plurals** that follow the rules of each language (PocketBase's JS runtime has no `Intl`, so they are in the plugin).
+- **Numbers and dates** written the way each language writes them.
+- **Everything search engines want**: `hreflang` links, a single address for each page, `Content-Language`.
+
+It needs `pocketpages` 0.23 or newer.
+
+## Installation
+
+```bash
+npm install pocketpages-plugin-i18n
+```
+
+## Setup
+
+```javascript
+// +config.js
+module.exports = {
+  plugins: [
+    'pocketpages-plugin-ejs',
+    {
+      name: 'pocketpages-plugin-i18n',
+      locales: ['en', 'es'], // the first one is the default
+    },
+  ],
+}
+```
+
+Put one file for each language in a `locales` folder next to `pages` (in `pb_hooks`):
+
+```
+pb_hooks/
+  locales/
+    en.json
+    es.json
+  pages/
+```
+
+```json
+// locales/en.json
+{
+  "nav": { "home": "Home", "about": "About us" },
+  "welcome": "Welcome, {name}!",
+  "items": { "one": "{count} item", "other": "{count} items" }
+}
+```
+
+```json
+// locales/es.json
+{
+  "nav": { "home": "Inicio", "about": "Quiénes somos" },
+  "welcome": "¡Bienvenido, {name}!",
+  "items": { "one": "{count} elemento", "other": "{count} elementos" }
+}
+```
+
+## Usage
+
+```html
+<!-- pages/+layout.ejs -->
+<!DOCTYPE html>
+<html lang="<%= locale %>" dir="<%= i18n.dir %>">
+  <head>
+    <%- i18n.hreflang() %>
+  </head>
+  <body>
+    <nav>
+      <a href="<%= localePath('/') %>"><%= t('nav.home') %></a>
+      <a href="<%= localePath('/about') %>"><%= t('nav.about') %></a>
+    </nav>
+
+    <% for (const alt of i18n.alternates()) { %>
+    <a href="<%= alt.path %>" hreflang="<%= alt.locale %>" <%= alt.current ? 'aria-current="true"' : '' %>><%= alt.locale %></a>
+    <% } %> <%- slot %>
+  </body>
+</html>
+```
+
+```html
+<!-- pages/index.ejs -->
+<h1><%= t('welcome', { name: 'Ana' }) %></h1>
+<p><%= t('items', { count: 3 }) %></p>
+```
+
+Visit `/` for English and `/es/` for Spanish: the same page, in the language of the address.
+
+|                                      |                                                                                                                          |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| `t(key, vars?)`                      | A translation. `vars` fills in `{name}`; a number in `vars.count` picks the form of a plural.                            |
+| `t.html(key, vars?)`                 | The same, with the variables escaped for HTML, for messages that hold markup                                             |
+| `t.has(key)`                         | Whether a translation exists                                                                                             |
+| `locale`                             | The language of the visitor: `en`, `es`, `pt-BR`                                                                         |
+| `localePath(path, locale?)`          | The address of `path` in a language: `/about` is `/es/about`. Only for addresses on your site.                           |
+| `i18n.locales`, `i18n.defaultLocale` | The languages of the site and the default one                                                                            |
+| `i18n.dir`                           | `ltr`, or `rtl` for Arabic, Hebrew, Persian...                                                                           |
+| `i18n.alternates()`                  | The page in every language, `[{ locale, path, current }]`, for a language switcher                                       |
+| `i18n.hreflang()`                    | `<link rel="alternate" hreflang="...">` tags for every language (and `x-default`) for the `<head>`                       |
+| `i18n.formatNumber(n, opts?)`        | `1234567.5` as `1,234,567.5` or `1.234.567,5`. `opts.decimals` fixes the digits after the point.                         |
+| `i18n.formatDate(date, style?)`      | `short`, `medium`, `long`, `time` or `datetime`, or a pattern. `date` can be a `Date`, an ISO string, a PocketBase date. |
+
+### Translations
+
+Messages are looked up in the language of the visitor, then in its main language (`pt-BR`, then `pt`), then in the default language. When none of them has it, `t()` returns the key, so a missing translation shows up as the key on the page and in the log (with `debug`).
+
+**Plurals** are messages with the names of the forms. Which form goes with a count depends on the language: English has `one` and `other`, Russian `one`, `few` and `many`, Arabic six, Japanese only `other`. The rules of CLDR for about 50 languages are in the plugin. A message can also name exact numbers:
+
+```json
+{
+  "cart": {
+    "0": "Your cart is empty",
+    "one": "One item in your cart",
+    "other": "{count} items in your cart"
+  }
+}
+```
+
+**Variables** are `{name}`. They are put in as they are, so escape them when the message holds markup and the values are not yours: `t.html()` does. Print its result unescaped (`<%- t.html('welcome', { name }) %>`), the message is yours and the variables are escaped already.
+
+**Nested keys** are asked for with dots: `t('nav.home')`. A file can also hold dotted keys as they are (`"nav.home": "Home"`).
+
+Names that start with `_` at the top of a file are settings of the language, not messages (see formats below).
+
+You can also write translations in the config, which is handy for a couple of languages and a few strings. The files win over what the config says:
+
+```javascript
+{ name: 'pocketpages-plugin-i18n', locales: ['en', 'es'], messages: { es: { greeting: 'Hola' } } }
+```
+
+Translation files are read once and kept. With `--dev` they are read again for every request, so you see the changes you make.
+
+## Addresses
+
+By default the default language has no prefix and the others do: `/about`, `/es/about`. Options change that:
+
+| Option                  | What it does                                                                                                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `prefixDefault: true`   | The default language has a prefix as well: `/en/about`. Visitors that arrive without one are sent to their language.           |
+| `redirectDefaultPrefix` | `true` (default). With no prefix for the default language, `/en/about` is sent to `/about`, so each page has a single address. |
+| `autoRedirect: true`    | Visitors who come to an address without a prefix, for the first time, are sent to the language their browser asks for.         |
+| `strategy: 'none'`      | No prefixes at all. The language comes from the `pp_lang` cookie, then from the language of the browser, then the default.     |
+
+A page with a single address per language is what search engines like. `strategy: 'none'` and `autoRedirect` make the answer depend on cookies and headers, which is the opposite, and `Vary` headers say so.
+
+`remember` keeps the language in the `pp_lang` cookie (`cookieName` changes the name). It is on for `strategy: 'none'`, `prefixDefault` and `autoRedirect`, which need it, and off otherwise: addresses are enough, and pages without cookies can be cached.
+
+Only `GET` and `HEAD` requests are redirected. A form posted to `/en/contact` is served.
+
+### Links
+
+Write links with `localePath()` so they stay in the language: `<a href="<%= localePath('/about') %>">`. Links to files (`/assets/app.css`) are not pages, and don't need it.
+
+The language of the address is also what [pagination](/docs/plugins/pagination) and [RBAC](/docs/plugins/rbac) links keep: the login page a visitor is sent to is the one in their language (list the i18n plugin before RBAC for that), and `?next=` brings them back to the address they came from.
+
+## Numbers and dates
+
+The runtime PocketBase uses has no `Intl`, so the plugin carries the formats that differ most between languages: separators for numbers, month and day names, date patterns (English, Spanish, Portuguese, French, German, Italian, Dutch, Russian, Polish, Japanese, Chinese and Korean have their own; others get English). Anything you want to change goes in the translation file of the language, under `_format`:
+
+```json
+{
+  "_format": {
+    "number": { "group": " ", "decimal": "," },
+    "dates": {
+      "short": "DD/MM/YYYY",
+      "long": "D [de] MMMM [de] YYYY",
+      "time": "HH:mm"
+    },
+    "names": { "months": ["...", "..."] }
+  }
+}
+```
+
+Patterns: `YYYY` `YY` year, `MMMM` `MMM` `MM` `M` month, `DD` `D` day, `dddd` `ddd` weekday, `HH` `H` hours (24), `hh` `h` hours (12), `mm` minutes, `ss` seconds, `A` AM/PM. Text in `[brackets]` is written as it is. Dates are written in UTC; pass `{ utc: false }` to use the time zone of the server.
+
+## Options
+
+```javascript
+{
+  name: 'pocketpages-plugin-i18n',
+  locales: ['en', 'es', 'pt-BR'], // required
+  defaultLocale: 'en',            // the first of the locales unless told otherwise
+  strategy: 'prefix',             // or 'none'
+  prefixDefault: false,
+  redirectDefaultPrefix: true,
+  autoRedirect: false,
+  remember: false,                // see above for the default
+  cookieName: 'pp_lang',
+  dir: 'locales',                 // the folder with the files, relative to pb_hooks
+  messages: {},                   // translations written in the config
+  format: {},                     // like _format of the files, by language
+  baseUrl: 'https://example.com', // for hreflang links, the appURL setting of PocketBase by default
+}
+```
+
+Set `appURL` in PocketBase's settings (or `baseUrl`) for `hreflang()`: the links must be absolute.
+
+## Page caches
+
+Pages in different languages have different addresses with the default strategy, which is what the [page cache](/docs/plugins/page-cache) needs. With `strategy: 'none'` the same address holds pages in several languages: do not cache them.
