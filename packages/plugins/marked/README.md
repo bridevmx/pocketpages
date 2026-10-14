@@ -41,6 +41,11 @@ The order of plugins in the `plugins` array determines their processing order:
 
 - **`extensions`**: Array of file extensions to process (default: `['.md']`)
 - **`debug`**: Enable debug output for the plugin (default: `false`)
+- **`cache`**: Remember the HTML generated for each piece of Markdown instead of parsing it again on every request (default: the `cache` setting in `+config.js`, which is `true` unless PocketBase runs with `--dev`)
+
+### Caching
+
+Parsing Markdown is slow, and the same page (or partial, like a table of contents) is usually rendered over and over. The result is kept for each Markdown text and route, so it is only parsed again when the text changes. Rendered pages are shared between all the JavaScript runtimes PocketBase uses, so each one is only held in memory once. At most 1000 pages are kept.
 
 ## Features
 
