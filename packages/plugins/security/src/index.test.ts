@@ -79,6 +79,10 @@ const exchange = (
     ip?: string
     secure?: boolean
     route?: any
+    /** What the router makes of the path, `path` itself if nothing */
+    canonical?: string
+    /** The host of the request, which Go keeps out of the headers */
+    host?: string
   } = {}
 ) => {
   const headers = new Map(
@@ -89,6 +93,8 @@ const exchange = (
   const request: any = {
     method: init.method ?? 'GET',
     pathname: init.path ?? '/',
+    canonicalPath: init.canonical ?? init.path ?? '/',
+    event: { request: { host: init.host ?? '' } },
     ip: init.ip ?? '203.0.113.9',
     secure: init.secure ?? false,
     auth: init.auth,
@@ -609,4 +615,63 @@ test('rules have to make sense', () => {
   expect(() =>
     make({ rateLimit: { rules: [{ limit: 5, window: 5 }] } })
   ).toThrow('rate limit rule 0')
+})
+
+// --- one page, many addresses
+
+test('a limit on a page holds for every address that leads to it', () => {
+  const plugin = limited()
+  const results = [1, 2, 3, 4].map((i) => {
+    const x = exchange({
+      method: 'POST',
+      path: i % 2 ? '/login' : '/login/index',
+      canonical: '/login',
+      route: null,
+    })
+    return catching(() =>
+      plugin.onRequest!({
+        request: x.request,
+        response: x.response,
+        route: null,
+      })
+    )?.status
+  })
+  expect(results).toEqual([undefined, undefined, undefined, 429])
+})
+
+test('the address in the URL and the page behind it both have to be exempt from the CSRF check', () => {
+  const plugin = make({ csrf: { ignore: ['/webhooks/stripe'] } })
+  const post = (path: string, canonical: string) =>
+    catching(() => run(plugin, exchange({ method: 'POST', path, canonical })))
+  expect(post('/webhooks/stripe', '/webhooks/stripe')).toBeUndefined()
+  // Another address of the same page is not a way around the check, nor a way in
+  expect(post('/webhooks/stripe/index', '/webhooks/stripe')).toMatchObject({
+    status: 403,
+  })
+  // An address that leads to a page that is not exempt
+  expect(post('/webhooks/stripe', '/orders')).toMatchObject({ status: 403 })
+})
+
+test('the origin of a request is compared with the host of the request, which Go keeps out of the headers', () => {
+  const plugin = make()
+  const get = exchange({ host: 'example.test' })
+  const token = run(plugin, get).csrf.token()
+  const cookie = get.cookies[0]!.value
+  const post = (origin: string, host = 'example.test') =>
+    catching(() =>
+      run(
+        plugin,
+        exchange({
+          method: 'POST',
+          host,
+          cookies: { pp_csrf: cookie },
+          body: { _csrf: token },
+          headers: { Origin: origin },
+        })
+      )
+    )
+  expect(post('https://example.test')).toBeUndefined()
+  expect(post('https://evil.test')).toMatchObject({
+    message: 'CSRF origin not allowed',
+  })
 })

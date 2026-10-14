@@ -147,6 +147,8 @@ A request is counted against every rule that matches it. When one of them says n
 
 The windows slide: the requests of the previous window still count in proportion to how much of it is left, so a client cannot make a full allowance at the end of a window and another at the start of the next.
 
+A page answers at more than one address (`/login` is also `/login/index`), and a rule holds for all of them: a request counts for a rule if the address in the URL or the address of the page that serves it matches. The same page is exempt from the CSRF check (`ignore`) only if both do.
+
 Rules also apply to requests PocketBase answers itself, so `{ path: '/api/collections/users/auth-with-password', ... }` protects PocketBase's own login.
 
 **Addresses.** Clients are told apart by `request.ip`, which is what PocketBase works out: the address of the connection, or the one in the headers of the proxies you list as trusted in PocketBase's settings. Behind a reverse proxy, set that up, or every client has the address of the proxy.

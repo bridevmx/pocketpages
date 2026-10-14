@@ -244,7 +244,7 @@ const securityPluginFactory: PluginFactory<SecurityOptions> = (
     }
 
     const verify = () => {
-      const host = request.header('Host')
+      const host = request.header('Host') || request.event.request?.host || ''
       const forwarded = request.header('X-Forwarded-Host').split(',')[0]!.trim()
       const origin = checkOrigin({
         secFetchSite: request.header('Sec-Fetch-Site'),
@@ -361,10 +361,18 @@ const securityPluginFactory: PluginFactory<SecurityOptions> = (
   const enforceRules = (request: PagesRequest, response: PagesResponse) => {
     sweepSometimes()
     const { pathname, method } = request
+    // A page answers at more than one address: a limit on `/login` holds for
+    // `/login/index` as well
+    const canonical = request.canonicalPath ?? pathname
     for (let i = 0; i < rules.length; i++) {
       const rule = rules[i]!
       if (rule.methods && !rule.methods.has(method)) continue
-      if (!rule.match(pathname)) continue
+      if (
+        !rule.match(pathname) &&
+        !(canonical !== pathname && rule.match(canonical))
+      ) {
+        continue
+      }
       const subject =
         rule.by === 'user' && request.auth
           ? `user:${request.auth.id}`
@@ -401,7 +409,11 @@ const securityPluginFactory: PluginFactory<SecurityOptions> = (
         const { csrf, verify } = createCsrf(request, response)
         if (
           unsafeMethods.has(request.method) &&
-          !isCsrfIgnored(request.pathname)
+          // Exempt only if the address in the URL and the page behind it both are
+          !(
+            isCsrfIgnored(request.pathname) &&
+            isCsrfIgnored(request.canonicalPath ?? request.pathname)
+          )
         ) {
           verify()
         }
