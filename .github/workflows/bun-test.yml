@@ -20,3 +20,6 @@ jobs:
       - name: Run tests with coverage
         run: bun test --coverage
         working-directory: ./packages/pocketpages/src/lib
+      - name: Run EJS plugin tests
+        run: bun test
+        working-directory: ./packages/plugins/ejs

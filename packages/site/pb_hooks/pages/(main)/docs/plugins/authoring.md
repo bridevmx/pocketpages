@@ -30,6 +30,12 @@ module.exports = (config, options) => {
 }
 ```
 
+### Plugin Lifecycle
+
+PocketBase runs request handlers in a pool of JavaScript runtimes. A plugin factory runs **once per runtime** (the first time the runtime serves a request), not once per request, and the plugin it returns is used for every request that runtime handles after that. A runtime only handles one request at a time.
+
+This makes it cheap to set things up in the factory, but anything the factory keeps in a variable lives across requests. Do not keep per-request state there, or reset it in a hook that runs for every request (`onRequest`, or `onExtendContextApi` for requests that PocketPages renders).
+
 ### Configuration Parameters
 
 The plugin factory receives two parameters:
@@ -55,11 +61,17 @@ Plugins can implement any of these hooks to modify application behavior:
 Called at the start of each request, before any processing begins.
 
 ```javascript
-onRequest({ request, response }) {
+onRequest({ request, response, route }) {
   // Modify request/response
   // Add headers, check auth, etc.
 }
 ```
+
+`route` is the route the request is going to be served by, `null` if it matches none (so it is not for PocketPages to serve, as with PocketBase API requests), and `undefined` with versions of PocketPages that do not say. Check it if the work you do is only useful for pages, and return early otherwise: `route.isStatic` tells files that are served as they are from pages.
+
+Requests that no route matches go straight back to PocketBase, without creating the `request` and `response` objects, when no plugin has an `onRequest` hook. Every plugin that has one makes PocketPages do that work for all requests, so keep it cheap.
+
+A plugin that changes `request.url` here sends the request to the route of the new URL.
 
 ### `onRender(context: RenderContext): string`
 

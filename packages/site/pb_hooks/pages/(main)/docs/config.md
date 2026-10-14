@@ -80,6 +80,10 @@ module.exports = function (api) {
 
 - **`debug`**: A boolean that enables internal PocketPages debugging output to the console. When set to `true`, it will output information about routes, parameters, and other internal details that are helpful for troubleshooting. Defaults to `false`.
 
+- **`cache`**: A boolean that controls whether PocketPages (and the plugins) remember what they read from disk, instead of reading it again on every request: compiled templates, where `include()` and `resolve()` found their files, and the contents of files loaded with `resolve()` in `raw`, `script` or `style` mode. Defaults to `true`, except when PocketBase runs with `--dev`, where it defaults to `false` so that edits show up on the next request.
+
+  With caching on, edits to templates, partials and resolved files are picked up when PocketBase restarts. It does so by itself when `pb_hooks` changes (`--hooksWatch`, on by default, except on Windows). Set `cache: false` if you edit files while the app runs without restarting.
+
 ## Plugin Configuration Formats
 
 PocketPages supports several formats for configuring plugins. Here are all the valid formats:

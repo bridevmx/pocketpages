@@ -37,6 +37,10 @@ pb_hooks/pages/
     style.css
 ```
 
+## Templates and Files
+
+Compiled templates, the places `include()` and `resolve()` found their files, and the contents of files loaded with `resolve()` in `raw`, `script` or `style` mode are kept in memory so they are not read from disk and compiled on every request. See the [`cache` option](/docs/config) to turn this off. It is off by default when PocketBase runs with `--dev`.
+
 ## Development vs Production
 
 ### Development Mode
@@ -111,13 +115,17 @@ Fingerprinted assets work well with CDNs:
 
 ### Cache Control Headers
 
+Fingerprinted URLs never change, so PocketPages serves them with `Cache-Control: public, max-age=31536000, immutable`: browsers and CDNs keep them without asking again. Requests for the plain file name (`/images/logo.png`) are not marked this way, since the content behind them can change.
+
+Static files do not go through middleware, so to set other headers on pages (not on static files) use a middleware:
+
 ```javascript
 /** @type {import('pocketpages').MiddlewareLoaderFunc} */
 module.exports = function (api) {
   const { response } = api
 
-  // Set cache headers for static assets
-  response.header('Cache-Control', 'public, max-age=31536000')
+  // Let CDNs keep rendered pages for a minute
+  response.header('Cache-Control', 'public, max-age=60')
 
   return {}
 }
@@ -153,7 +161,8 @@ module.exports = function (api) {
 - Fingerprinting requires files to exist in pages directory
 - Development mode helps identify missing assets
 - CDNs can cache fingerprinted assets indefinitely
-- Use middleware to set cache control headers
+- Fingerprinted URLs are served with long-term cache headers automatically
+- Use middleware to set cache control headers on pages
 - Relative paths for local assets, absolute for global
 
 ## Reference
