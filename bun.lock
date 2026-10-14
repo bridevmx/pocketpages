@@ -67,6 +67,32 @@
         "typescript": "^5.7.3",
       },
     },
+    "packages/plugins/forms": {
+      "name": "pocketpages-plugin-forms",
+      "version": "0.0.0",
+      "devDependencies": {
+        "pocketbase-jsvm": "^0.25.10001",
+        "pocketpages": "workspace:>=0.22.3",
+        "tsdown": "^0.12.7",
+        "typescript": "^5.7.3",
+      },
+      "peerDependencies": {
+        "pocketpages": ">=0.23.0",
+      },
+    },
+    "packages/plugins/i18n": {
+      "name": "pocketpages-plugin-i18n",
+      "version": "0.0.0",
+      "devDependencies": {
+        "pocketbase-jsvm": "^0.25.10001",
+        "pocketpages": "workspace:>=0.22.3",
+        "tsdown": "^0.12.7",
+        "typescript": "^5.7.3",
+      },
+      "peerDependencies": {
+        "pocketpages": ">=0.23.0",
+      },
+    },
     "packages/plugins/js-sdk": {
       "name": "pocketpages-plugin-js-sdk",
       "version": "0.2.0",
@@ -93,6 +119,45 @@
         "typescript": "^5.7.3",
       },
     },
+    "packages/plugins/page-cache": {
+      "name": "pocketpages-plugin-page-cache",
+      "version": "0.0.0",
+      "devDependencies": {
+        "pocketbase-jsvm": "^0.25.10001",
+        "pocketpages": "workspace:>=0.22.3",
+        "tsdown": "^0.12.7",
+        "typescript": "^5.7.3",
+      },
+      "peerDependencies": {
+        "pocketpages": ">=0.23.0",
+      },
+    },
+    "packages/plugins/pagination": {
+      "name": "pocketpages-plugin-pagination",
+      "version": "0.0.0",
+      "devDependencies": {
+        "pocketbase-jsvm": "^0.25.10001",
+        "pocketpages": "workspace:>=0.22.3",
+        "tsdown": "^0.12.7",
+        "typescript": "^5.7.3",
+      },
+      "peerDependencies": {
+        "pocketpages": ">=0.23.0",
+      },
+    },
+    "packages/plugins/rbac": {
+      "name": "pocketpages-plugin-rbac",
+      "version": "0.0.0",
+      "devDependencies": {
+        "pocketbase-jsvm": "^0.25.10001",
+        "pocketpages": "workspace:>=0.22.3",
+        "tsdown": "^0.12.7",
+        "typescript": "^5.7.3",
+      },
+      "peerDependencies": {
+        "pocketpages": ">=0.23.0",
+      },
+    },
     "packages/plugins/realtime": {
       "name": "pocketpages-plugin-realtime",
       "version": "0.2.0",
@@ -102,6 +167,45 @@
         "pocketpages": "workspace:>=0.16.0",
         "tsdown": "^0.12.7",
         "typescript": "^5.7.3",
+      },
+    },
+    "packages/plugins/security": {
+      "name": "pocketpages-plugin-security",
+      "version": "0.0.0",
+      "devDependencies": {
+        "pocketbase-jsvm": "^0.25.10001",
+        "pocketpages": "workspace:>=0.22.3",
+        "tsdown": "^0.12.7",
+        "typescript": "^5.7.3",
+      },
+      "peerDependencies": {
+        "pocketpages": ">=0.23.0",
+      },
+    },
+    "packages/plugins/seo": {
+      "name": "pocketpages-plugin-seo",
+      "version": "0.0.0",
+      "devDependencies": {
+        "pocketbase-jsvm": "^0.25.10001",
+        "pocketpages": "workspace:>=0.22.3",
+        "tsdown": "^0.12.7",
+        "typescript": "^5.7.3",
+      },
+      "peerDependencies": {
+        "pocketpages": ">=0.23.0",
+      },
+    },
+    "packages/plugins/session": {
+      "name": "pocketpages-plugin-session",
+      "version": "0.0.0",
+      "devDependencies": {
+        "pocketbase-jsvm": "^0.25.10001",
+        "pocketpages": "workspace:>=0.22.3",
+        "tsdown": "^0.12.7",
+        "typescript": "^5.7.3",
+      },
+      "peerDependencies": {
+        "pocketpages": ">=0.23.0",
       },
     },
     "packages/pocketpages": {
@@ -884,11 +988,27 @@
 
     "pocketpages-plugin-ejs": ["pocketpages-plugin-ejs@workspace:packages/plugins/ejs"],
 
+    "pocketpages-plugin-forms": ["pocketpages-plugin-forms@workspace:packages/plugins/forms"],
+
+    "pocketpages-plugin-i18n": ["pocketpages-plugin-i18n@workspace:packages/plugins/i18n"],
+
     "pocketpages-plugin-js-sdk": ["pocketpages-plugin-js-sdk@workspace:packages/plugins/js-sdk"],
 
     "pocketpages-plugin-micro-dash": ["pocketpages-plugin-micro-dash@workspace:packages/plugins/micro-dash"],
 
+    "pocketpages-plugin-page-cache": ["pocketpages-plugin-page-cache@workspace:packages/plugins/page-cache"],
+
+    "pocketpages-plugin-pagination": ["pocketpages-plugin-pagination@workspace:packages/plugins/pagination"],
+
+    "pocketpages-plugin-rbac": ["pocketpages-plugin-rbac@workspace:packages/plugins/rbac"],
+
     "pocketpages-plugin-realtime": ["pocketpages-plugin-realtime@workspace:packages/plugins/realtime"],
+
+    "pocketpages-plugin-security": ["pocketpages-plugin-security@workspace:packages/plugins/security"],
+
+    "pocketpages-plugin-seo": ["pocketpages-plugin-seo@workspace:packages/plugins/seo"],
+
+    "pocketpages-plugin-session": ["pocketpages-plugin-session@workspace:packages/plugins/session"],
 
     "pocketpages-site": ["pocketpages-site@workspace:packages/site"],
 

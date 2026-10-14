@@ -23,3 +23,9 @@ jobs:
       - name: Run EJS plugin tests
         run: bun test
         working-directory: ./packages/plugins/ejs
+      - name: Run plugin tests
+        run: |
+          for plugin in security session forms pagination rbac i18n seo page-cache; do
+            echo "== $plugin"
+            (cd "packages/plugins/$plugin" && bun test)
+          done
