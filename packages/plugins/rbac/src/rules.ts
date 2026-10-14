@@ -147,3 +147,76 @@ export const safeNext = (value: unknown, fallback = '/'): string => {
   if (value.indexOf('\\') !== -1) return fallback
   return value
 }
+
+const RBAC = 'pocketpages-plugin-rbac'
+
+/**
+ * Plugins that change the address or the method of a request, and so have to come before
+ * the rules are applied: the rules would otherwise be checked against a request that is
+ * not the one that gets served (`/es/admin` for the page at `/admin`, a `POST` that
+ * is served as a `DELETE`).
+ */
+const REWRITERS: Array<{
+  name: string
+  why: string
+  off?: (options: Record<string, unknown>) => boolean
+}> = [
+  {
+    name: 'pocketpages-plugin-i18n',
+    why: 'it takes the language out of the address',
+  },
+  {
+    name: 'pocketpages-plugin-forms',
+    why: 'it turns a POST into a PUT, PATCH or DELETE',
+    off: (options) => options.methodOverride === false,
+  },
+]
+
+const nameOf = (plugin: unknown): string | undefined => {
+  if (typeof plugin === 'string') return plugin
+  if (plugin && typeof plugin === 'object') {
+    const name = (plugin as Record<string, unknown>).name
+    return typeof name === 'string' ? name : undefined
+  }
+  return undefined
+}
+
+/**
+ * The plugins of the config that rewrite requests and are listed after RBAC. Plugins
+ * written as functions can't be told apart and are left alone.
+ */
+export const misplacedPlugins = (plugins: unknown[]): string[] => {
+  const mine = plugins.findIndex((plugin) => nameOf(plugin) === RBAC)
+  if (mine === -1) return []
+  const found: string[] = []
+  for (let i = mine + 1; i < plugins.length; i++) {
+    const plugin = plugins[i]
+    const name = nameOf(plugin)
+    const rewriter = REWRITERS.find((r) => r.name === name)
+    if (!rewriter) continue
+    const options =
+      plugin && typeof plugin === 'object'
+        ? (plugin as Record<string, unknown>)
+        : {}
+    if (rewriter.off?.(options)) continue
+    found.push(`${rewriter.name} (${rewriter.why})`)
+  }
+  return found
+}
+
+/**
+ * Decides for the address in the URL and for the address of the page that serves it
+ * (`/account` for `/account/index`): the request is let through only if both are allowed.
+ * Several URLs lead to one page, and a rule for the page has to hold for all of them.
+ */
+export const decideAll = (
+  rules: CompiledRule[],
+  subject: Subject,
+  method: string,
+  pathname: string,
+  canonicalPath: string
+): Decision => {
+  const literal = decide(rules, subject, method, pathname)
+  if (literal !== 'allow' || canonicalPath === pathname) return literal
+  return decide(rules, subject, method, canonicalPath)
+}

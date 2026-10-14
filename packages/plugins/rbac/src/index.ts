@@ -6,8 +6,9 @@ import type {
 import {
   AccessRule,
   compileRules,
-  decide,
+  decideAll,
   Decision,
+  misplacedPlugins,
   rolesOf,
   safeNext,
   Subject,
@@ -96,6 +97,17 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
   }
   const rules = compileRules(options.rules, globalApi.pathMatcher)
 
+  // Rules are checked against the request as it is when they run. A plugin listed
+  // after this one that rewrites the address or the method would get past them.
+  const misplaced = misplacedPlugins(
+    (config.config?.plugins as unknown[] | undefined) ?? []
+  )
+  if (misplaced.length > 0) {
+    throw new Error(
+      `pocketpages-plugin-rbac: list it after ${misplaced.join(' and ')}, or its rules are checked against a request that is not the one that gets served`
+    )
+  }
+
   const subjectOf = (request: PagesRequest): Subject => {
     const auth = request.auth
     if (!auth) return { signedIn: false, roles: [], verified: false }
@@ -115,7 +127,8 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
   /** Where the visitor is, as they asked for it */
   const hereOf = (request: PagesRequest) => {
     const url = request.event.request!.url!
-    return url.rawQuery ? `${url.path}?${url.rawQuery}` : url.path
+    const path = url.escapedPath?.() ?? url.path
+    return url.rawQuery ? `${path}?${url.rawQuery}` : path
   }
 
   /**
@@ -152,21 +165,36 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
     }
   }
 
+  /**
+   * Applies the rules to the request as it is now. A plugin may change the address or
+   * the method after this one has looked at them, so this runs once more, when pages
+   * get their API, for whatever is not the same by then.
+   */
+  const check = (request: PagesRequest) => {
+    const key = `${request.method} ${request.pathname}`
+    if (request.state.rbac?.checked === key) return
+    const decision = decideAll(
+      rules,
+      subjectOf(request),
+      request.method,
+      request.pathname,
+      request.canonicalPath ?? request.pathname
+    )
+    if (decision === 'allow') {
+      request.state.rbac = { ...request.state.rbac, checked: key }
+      return
+    }
+    dbg(`${decision}: ${request.method} ${request.pathname}`)
+    refuse(request, decision)
+  }
+
   return {
     name: 'rbac',
 
     onRequest: ({ request, route }) => {
       // Requests PocketPages does not serve are for PocketBase, and its own rules
       if (!route || rules.length === 0) return
-      const decision = decide(
-        rules,
-        subjectOf(request),
-        request.method,
-        request.pathname
-      )
-      if (decision === 'allow') return
-      dbg(`${decision}: ${request.method} ${request.pathname}`)
-      refuse(request, decision)
+      check(request)
     },
 
     onError: ({ status, request, response, route }) => {
@@ -199,6 +227,7 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
 
     onExtendContextApi: ({ api }) => {
       const { request } = api
+      if (rules.length > 0) check(request)
       let subject: Subject | undefined
       const who = () => subject ?? (subject = subjectOf(request))
 
@@ -206,7 +235,13 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
         roles: () => who().roles.slice(),
         hasRole: (...roles) => roles.some((r) => who().roles.indexOf(r) !== -1),
         can: (path, method = 'GET') =>
-          decide(rules, who(), method.toUpperCase(), path) === 'allow',
+          decideAll(
+            rules,
+            who(),
+            method.toUpperCase(),
+            path,
+            globalApi.canonicalPath(path)
+          ) === 'allow',
         requireAuth: () => {
           if (!who().signedIn) refuse(request, 'unauthenticated')
         },

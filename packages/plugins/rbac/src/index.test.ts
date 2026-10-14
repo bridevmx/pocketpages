@@ -26,16 +26,29 @@ g.NotFoundError = class extends FakeError {
 
 const { default: factory } = await import('./index')
 
-const make = (options: Record<string, any> = {}) =>
-  factory({ globalApi: { pathMatcher }, dbg: () => {} } as any, {
-    debug: false,
-    rules: [
-      { path: '/account/**', auth: true },
-      { path: '/admin/**', roles: ['admin'] },
-      { path: '/orders/**', verified: true },
-    ],
-    ...options,
-  })
+/** What the router makes of the URLs of the pages of these tests */
+const canonicalOf = (path: string) =>
+  path
+    .replace(/^(.*?)\/index(\/.*)?$/, '$1')
+    .replace(/^(\/dashboard)\/.+$/, '$1') || '/'
+
+const make = (options: Record<string, any> = {}, plugins?: unknown[]) =>
+  factory(
+    {
+      globalApi: { pathMatcher, canonicalPath: canonicalOf },
+      config: plugins ? { plugins } : undefined,
+      dbg: () => {},
+    } as any,
+    {
+      debug: false,
+      rules: [
+        { path: '/account/**', auth: true },
+        { path: '/admin/**', roles: ['admin'] },
+        { path: '/orders/**', verified: true },
+      ],
+      ...options,
+    }
+  )
 
 type Who =
   | { id: string; fields?: Record<string, unknown>; collection?: string }
@@ -57,6 +70,7 @@ const exchange = (
   const request: any = {
     method: init.method ?? 'GET',
     pathname: init.path ?? '/',
+    canonicalPath: canonicalOf(init.path ?? '/'),
     state: {
       session: {
         flash: (type: string, message: string) => flashes.push([type, message]),
@@ -70,7 +84,13 @@ const exchange = (
       collection: () => ({ name: who.collection ?? 'users' }),
     },
     event: {
-      request: { url: { path: init.path ?? '/', rawQuery: init.query ?? '' } },
+      request: {
+        url: {
+          path: init.path ?? '/',
+          escapedPath: () => init.path ?? '/',
+          rawQuery: init.query ?? '',
+        },
+      },
     },
   }
   const response: any = {
@@ -379,9 +399,159 @@ test('loaders can ask for a sign in or a role', () => {
 
 test('the login address for a page', () => {
   const plugin = make()
-  const rbac = apiFor(plugin, exchange({ path: '/account', query: 'a=1' }))
+  const rbac = apiFor(
+    plugin,
+    exchange({ path: '/account', query: 'a=1', who: member })
+  )
   expect(rbac.loginUrl()).toBe('/login?next=%2Faccount%3Fa%3D1')
   expect(rbac.loginUrl('/else')).toBe('/login?next=%2Felse')
   // Never to somewhere else
   expect(rbac.loginUrl('https://evil.example')).toBe('/login?next=%2F')
+})
+
+// --- one page, many addresses
+
+const aliasRules = [
+  { path: '/account', auth: true },
+  { path: '/admin/users', roles: ['admin'] },
+  { path: '/posts/*', methods: ['DELETE'], auth: true },
+  { path: '/dashboard', auth: true },
+]
+
+test('a rule for a page holds for every address that leads to it', () => {
+  const plugin = make({ rules: aliasRules })
+  for (const path of [
+    '/account/index',
+    '/account/index/x',
+    '/admin/users/index/x',
+    '/dashboard/anything/at/all',
+  ]) {
+    const error = attempt(plugin, exchange({ path, who: undefined }))
+    expect(error, path).toMatchObject({ status: 401 })
+  }
+  expect(
+    attempt(plugin, exchange({ path: '/admin/users/index/x', who: member }))
+  ).toMatchObject({ status: 403 })
+  expect(
+    attempt(plugin, exchange({ path: '/admin/users/index/x', who: admin }))
+  ).toBeUndefined()
+  expect(
+    attempt(plugin, exchange({ path: '/account/index', who: member }))
+  ).toBeUndefined()
+})
+
+test('rules for some methods hold for the address of the page too', () => {
+  const plugin = make({ rules: aliasRules })
+  expect(
+    attempt(plugin, exchange({ path: '/posts/5/index', method: 'DELETE' }))
+  ).toMatchObject({ status: 401 })
+  expect(
+    attempt(plugin, exchange({ path: '/posts/5/index', method: 'GET' }))
+  ).toBeUndefined()
+})
+
+test('an exception for the address in the URL does not open the page behind it', () => {
+  const plugin = make({
+    rules: [
+      { path: '/files/public', public: true },
+      { path: '/files/**', auth: true },
+    ],
+  })
+  const x = exchange({ path: '/files/public' })
+  x.request.canonicalPath = '/files'
+  expect(attempt(plugin, x)).toMatchObject({ status: 401 })
+})
+
+test('pages can ask about the aliases of a page too', () => {
+  const plugin = make({ rules: aliasRules })
+  const visitor = apiFor(plugin, exchange({ path: '/' }))
+  expect(visitor.can('/account')).toBe(false)
+  expect(visitor.can('/account/index')).toBe(false)
+  expect(visitor.can('/dashboard/anything')).toBe(false)
+  expect(
+    apiFor(plugin, exchange({ path: '/', who: member })).can('/account/index')
+  ).toBe(true)
+})
+
+// --- plugins that change the request
+
+test('the rules are checked again for the request that gets served', () => {
+  const plugin = make({ rules: [{ path: '/admin/**', roles: ['admin'] }] })
+
+  // The address is rewritten by a plugin after this one (/es/admin -> /admin)
+  const x = exchange({ path: '/es/admin', route: null })
+  expect(attempt(plugin, x)).toBeUndefined() // nothing to serve yet
+  x.request.pathname = '/admin'
+  x.request.canonicalPath = '/admin'
+  let error: any
+  try {
+    plugin.onExtendContextApi({
+      api: { request: x.request },
+      route: { isStatic: false },
+    })
+  } catch (e) {
+    error = e
+  }
+  expect(error).toMatchObject({ status: 401 })
+
+  // The method is changed by a plugin after this one (POST -> DELETE)
+  const methodRules = make({
+    rules: [{ path: '/comments/*', methods: ['DELETE'], roles: ['admin'] }],
+  })
+  const y = exchange({ path: '/comments/5', method: 'POST' })
+  expect(attempt(methodRules, y)).toBeUndefined()
+  y.request.method = 'DELETE'
+  error = undefined
+  try {
+    methodRules.onExtendContextApi({
+      api: { request: y.request },
+      route: y.route,
+    })
+  } catch (e) {
+    error = e
+  }
+  expect(error).toMatchObject({ status: 401 })
+})
+
+test('a request that was checked is not checked again for nothing', () => {
+  let decisions = 0
+  const plugin = make({ rules: [{ path: '/account/**', auth: true }] })
+  const x = exchange({ path: '/account', who: member })
+  expect(attempt(plugin, x)).toBeUndefined()
+  expect(x.request.state.rbac.checked).toBe('GET /account')
+  // The same request, once more, when pages get their API
+  Object.defineProperty(x.request, 'auth', {
+    get() {
+      decisions++
+      return {
+        id: 'u',
+        get: () => 'member',
+        collection: () => ({ name: 'users' }),
+      }
+    },
+  })
+  plugin.onExtendContextApi({ api: { request: x.request }, route: x.route })
+  expect(decisions).toBe(0)
+})
+
+test('listing the plugins in a bad order is an error, not a way around the rules', () => {
+  expect(() =>
+    make({}, ['pocketpages-plugin-rbac', 'pocketpages-plugin-i18n'])
+  ).toThrow('list it after pocketpages-plugin-i18n')
+  expect(() =>
+    make({}, [
+      { name: 'pocketpages-plugin-rbac' },
+      { name: 'pocketpages-plugin-forms' },
+    ])
+  ).toThrow('pocketpages-plugin-forms')
+  expect(() =>
+    make({}, [
+      { name: 'pocketpages-plugin-rbac' },
+      { name: 'pocketpages-plugin-forms', methodOverride: false },
+    ])
+  ).not.toThrow()
+  expect(() =>
+    make({}, ['pocketpages-plugin-i18n', 'pocketpages-plugin-rbac'])
+  ).not.toThrow()
+  expect(() => make({}, ['pocketpages-plugin-ejs'])).not.toThrow()
 })
