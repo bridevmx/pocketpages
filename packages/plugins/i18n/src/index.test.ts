@@ -1,10 +1,17 @@
-import { expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { afterAll, expect, test } from 'bun:test'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 const g = globalThis as any
 const root = mkdtempSync(path.join(tmpdir(), 'pp-i18n-'))
+afterAll(() => rmSync(root, { recursive: true, force: true }))
 g.__hooks = root
 g.$filepath = { join: (...parts: string[]) => path.join(...parts) }
 g.$os = { readFile: (file: string) => readFileSync(file) }

@@ -1,5 +1,5 @@
-import { beforeEach, expect, test } from 'bun:test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { afterAll, beforeEach, expect, test } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { installGlobals, makeEvent, route, store } from './testkit'
@@ -9,6 +9,17 @@ const { MiddlewareHandler } = await import('../handlers/MiddlewareHandler')
 const { publishCache } = await import('./cache')
 
 const g = globalThis as any
+
+// Loaders written to disk by the tests, removed when they are done
+const tempDirs: string[] = []
+const tempDir = (prefix: string) => {
+  const dir = mkdtempSync(path.join(tmpdir(), prefix))
+  tempDirs.push(dir)
+  return dir
+}
+afterAll(() => {
+  for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true })
+})
 
 const configure = (plugins: any[], routes: any[], debug = false) =>
   publishCache({ routes, config: { plugins, debug, cache: true } })
@@ -704,7 +715,7 @@ test('a template cannot be stopped by a redirect, but what it made is not sent',
 // --- loaders
 
 test('loaders are picked by the method plugins set on the request', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'pp-loaders-'))
+  const dir = tempDir('pp-loaders-')
   const write = (name: string, source: string) => {
     const file = path.join(dir, name)
     writeFileSync(file, source)
@@ -833,7 +844,7 @@ test('the status of a page that is JSON follows too', () => {
 })
 
 const writeLoader = (name: string, source: string) => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'pp-redirect-'))
+  const dir = tempDir('pp-redirect-')
   const file = path.join(dir, name)
   writeFileSync(file, source)
   return file
