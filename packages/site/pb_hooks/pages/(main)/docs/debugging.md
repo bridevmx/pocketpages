@@ -44,7 +44,7 @@ module.exports = {
     },
 
     // Other plugins remain quiet
-    'pocketpages-plugin-marked',
+    'pocketpages-plugin-auth',
   ],
   debug: false,
 }

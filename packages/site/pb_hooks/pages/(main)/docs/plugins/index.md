@@ -12,7 +12,6 @@ PocketPages has a highly **flexible plugin architecture** that allows you to ext
 PocketPages comes with several official plugins:
 
 - **EJS Plugin**: Template processing with enhanced features
-- **Markdown Plugin**: Process Markdown files with frontmatter support
 - **Realtime Plugin**: Add Server-Sent Events (SSE) support
 - **Authentication Plugin**: Complete auth system with multiple methods
 - **JS SDK Plugin**: PocketBase JavaScript SDK integration
@@ -31,15 +30,15 @@ PocketPages comes with several official plugins:
 
 Plugins are processed in the order they appear in your `plugins` array. This is particularly important when plugins modify content, as each plugin's output becomes the input for the next plugin.
 
-For example, when using both EJS and Markdown plugins:
+For example, a plugin that post-processes the HTML rendered by the EJS plugin has to come after it:
 
 ```javascript
 module.exports = {
   plugins: [
     // First: Process EJS templates
     'pocketpages-plugin-ejs',
-    // Second: Convert Markdown to HTML
-    'pocketpages-plugin-marked',
+    // Second: Receives the HTML the EJS plugin rendered
+    'my-html-post-processor',
   ],
 }
 ```

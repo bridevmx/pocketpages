@@ -92,29 +92,29 @@ PocketPages supports several formats for configuring plugins. Here are all the v
 
 The order of plugins in the `plugins` array determines their processing order. Each plugin's `onRender` hook is called in sequence, with the output of one plugin becoming the input for the next.
 
-For example, when processing a Markdown file with both EJS and Markdown plugins:
+For example, when a plugin turns the content of a file into something else after EJS has rendered it:
 
 ```javascript
 module.exports = {
   plugins: [
-    // Processes first - enables EJS in Markdown
+    // Processes first - renders the EJS in the file
     {
       name: 'pocketpages-plugin-ejs',
-      extensions: ['.ejs', '.md'],
+      extensions: ['.ejs', '.txt'],
     },
-    // Processes second - converts Markdown to HTML
-    'pocketpages-plugin-marked',
+    // Processes second - receives what the EJS plugin rendered
+    'my-text-transformer',
   ],
 }
 ```
 
 This configuration allows you to:
 
-1. Use EJS features within Markdown files
-2. Process the resulting content as Markdown
-3. Output the final HTML
+1. Use EJS features in every file the transformer handles
+2. Process the resulting content
+3. Output the final result
 
-Changing the order would process Markdown first, then EJS - which might be desirable in some cases but would prevent using EJS features within Markdown files.
+Changing the order would run the transformer first, then EJS - which might be desirable in some cases but would prevent the transformer from seeing the result of the EJS code.
 
 ```javascript
 module.exports = {
@@ -154,7 +154,7 @@ module.exports = {
 Important notes:
 
 - The `name` property should be the name of an npm package that exports a plugin factory
-- PocketPages plugins typically follow the naming convention `pocketpages-plugin-*` (e.g. `pocketpages-plugin-ejs`, `pocketpages-plugin-marked`)
+- PocketPages plugins typically follow the naming convention `pocketpages-plugin-*` (e.g. `pocketpages-plugin-ejs`, `pocketpages-plugin-auth`)
 - If both `fn` and `name` are present in an object configuration, `fn` takes precedence
 - The `fn` property is the only reserved key in plugin configuration objects
 - All other properties in plugin configuration objects are passed as options to the plugin
@@ -177,7 +177,7 @@ module.exports = {
       name: 'pocketpages-plugin-ejs',
       debug: true, // Only EJS plugin will output debug info
     },
-    'pocketpages-plugin-marked', // Debug defaults to false
+    'pocketpages-plugin-auth', // Debug defaults to false
   ],
   debug: false, // Global debugging remains off
 }

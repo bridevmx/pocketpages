@@ -44,7 +44,6 @@
 - [Datastar](/docs/plugins/datastar)
 - [EJS](/docs/plugins/ejs)
 - [JS SDK](/docs/plugins/js-sdk)
-- [Markdown](/docs/plugins/marked)
 - [Micro Dash](/docs/plugins/micro-dash)
 - [Realtime](/docs/plugins/realtime)
 - [Authoring](/docs/plugins/authoring)

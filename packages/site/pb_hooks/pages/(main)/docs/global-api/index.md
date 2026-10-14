@@ -92,7 +92,6 @@ Many additional utilities are available through official plugins:
 
 - **@pocketpages-plugin/js-sdk**: PocketBase SDK client
 - **@pocketpages-plugin/micro-dash**: Lodash-like utilities
-- **@pocketpages-plugin/marked**: Markdown processing
 
 ## Using in Libraries
 

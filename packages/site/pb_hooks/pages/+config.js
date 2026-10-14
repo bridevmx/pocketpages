@@ -6,7 +6,6 @@ module.exports = {
       extensions: ['.ejs', '.md'],
       debug: true,
     },
-    'pocketpages-plugin-marked',
     'pocketpages-plugin-datastar',
   ],
 }

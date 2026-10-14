@@ -52,7 +52,6 @@ Pocketpages runs as a PocketBase hook, inside the PocketPage JSVM which is power
 - [Datastar](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/datastar.md): Datastar reactive UI integration
 - [EJS](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/ejs.md): EJS templating engine plugin
 - [JS SDK](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/js-sdk.md): PocketBase JS SDK access inside templates
-- [Markdown](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/marked.md): Render Markdown content in pages
 - [Micro Dash](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/micro-dash.md): Lodash-compatible utility functions
 - [Realtime](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/realtime.md): Server-sent events and realtime subscriptions
 - [Plugin Authoring](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/authoring.md): How to write your own plugin

@@ -25,7 +25,7 @@ pb_hooks/
     _private/
       global-header.ejs
       global-footer.ejs
-      docs.md          # Markdown file processed after EJS
+      docs.ejs
     blog/
       _private/
         blog-sidebar.ejs
@@ -48,14 +48,11 @@ To include a partial, use the standard EJS include syntax:
 The included file will be processed through:
 
 1. EJS template engine first
-2. Any configured plugins that handle that file type (e.g., markdown files will be processed by the markdown plugin)
+2. Any configured plugins that handle that file type
 
 For example:
 
 ```ejs
-<!-- Including a markdown file that will be processed after EJS -->
-<%%- include('docs.md', { section: 'overview' }) %>
-
 <!-- Including an EJS template -->
 <%%- include('header.ejs', { title: 'My Page' }) %>
 ```
@@ -152,7 +149,7 @@ pb_hooks/
     _private/           // Global components used everywhere
       header.ejs
       footer.ejs
-      docs.md           // Markdown files processed after EJS
+      docs.ejs
     docs/
       _private/         // Documentation-specific components
         sidebar.ejs

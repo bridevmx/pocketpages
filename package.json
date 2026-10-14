@@ -17,7 +17,6 @@
     "publish:auth": "cd packages/plugins/auth && bun publish",
     "publish:ejs": "cd packages/plugins/ejs && bun publish",
     "publish:js-sdk": "cd packages/plugins/js-sdk && bun publish",
-    "publish:marked": "cd packages/plugins/marked && bun publish",
     "publish:micro-dash": "cd packages/plugins/micro-dash && bun publish",
     "publish:realtime": "cd packages/plugins/realtime && bun publish",
     "publish:create-pocketpages": "cd packages/create-pocketpages && bun publish",

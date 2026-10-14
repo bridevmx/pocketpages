@@ -252,8 +252,8 @@ const ejsPluinFactory: PluginFactory<EjsPluginOptions> = (config, extra) => {
   /**
    * What EJS does for `include('path')` in a template: find the file, compile it and
    * return a function that renders it. Rendered includes also go through the `onRender`
-   * hook of the other plugins (a `.md` partial included from an `.ejs` page is
-   * rendered by the markdown plugin, for instance).
+   * hook of the other plugins (a partial with an extension another plugin handles is
+   * rendered by that plugin, for instance).
    */
   const includeFile = (includePath: string, options: any) => {
     dbg(`includeFile ${includePath}`)

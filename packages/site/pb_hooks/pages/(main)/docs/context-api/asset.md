@@ -35,17 +35,6 @@ pb_hooks/
       style.css
 ```
 
-### Markdown Files
-
-Images in Markdown automatically resolve relative paths:
-
-```markdown
-<!-- feature/index.md -->
-
-![Local Image](image.png) <!-- → /feature/image.[hash].png -->
-![Global Image](/logo.png) <!-- → /logo.[hash].png -->
-```
-
 ### EJS Templates
 
 Use `asset()` for path resolution:
@@ -135,5 +124,4 @@ Assets are fingerprinted based on their content for cache invalidation:
 
 - Fingerprinting only works for files in your pages directory
 - Development mode adds cache busters for missing files
-- Markdown image paths auto-resolve relative to the current file
 - Use relative paths for local assets, absolute paths for global ones
