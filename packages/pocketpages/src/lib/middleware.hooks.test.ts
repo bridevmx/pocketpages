@@ -920,3 +920,124 @@ test('other responses from a loader do not stop the page', () => {
   expect(rendered).toEqual(['page'])
   expect(seen.headers['X-From-Loader']).toBe('1')
 })
+
+// --- addresses
+
+test('plugins can ask for the address of the page that serves the request', () => {
+  const seen: Record<string, string> = {}
+  configure(
+    [
+      () => ({
+        name: 'spy',
+        onRequest: ({ request }: any) => {
+          seen[request.pathname] = request.canonicalPath
+        },
+      }),
+      renderer(),
+    ],
+    [
+      page('account/index', {
+        segments: [{ nodeName: 'account' }, { nodeName: 'index' }],
+      }),
+      page('dashboard', { segments: [{ nodeName: 'dashboard' }] }),
+      page('index', { segments: [{ nodeName: 'index' }] }),
+    ]
+  )
+  for (const url of [
+    '/account',
+    '/account/index',
+    '/account/index/x',
+    '/dashboard/anything',
+    '/',
+    '/api/health',
+  ]) {
+    MiddlewareHandler(makeEvent(url).e)
+  }
+  expect(seen).toEqual({
+    '/account': '/account',
+    '/account/index': '/account',
+    '/account/index/x': '/account',
+    '/dashboard/anything': '/dashboard',
+    '/': '/',
+    '/api/health': '/api/health',
+  })
+})
+
+test('the address of the page follows a plugin that rewrites the URL', () => {
+  const seen: string[] = []
+  configure(
+    [
+      (config: any) => ({
+        name: 'rewrite',
+        onRequest: ({ request }: any) => {
+          if (request.pathname.startsWith('/es/')) {
+            request.url = config.globalApi.url(request.pathname.slice(3))
+          }
+        },
+      }),
+      () => ({
+        name: 'spy',
+        onRequest: ({ request }: any) => {
+          seen.push(`${request.pathname} ${request.canonicalPath}`)
+        },
+      }),
+    ],
+    [
+      page('admin/index', {
+        segments: [{ nodeName: 'admin' }, { nodeName: 'index' }],
+      }),
+    ]
+  )
+  MiddlewareHandler(makeEvent('/es/admin/index').e)
+  expect(seen).toEqual(['/admin/index /admin'])
+})
+
+test('the host is a header like any other', () => {
+  let host: string | undefined
+  let other: string | undefined
+  configure(
+    [
+      () => ({
+        name: 'spy',
+        onRequest: ({ request }: any) => {
+          host = request.header('Host')
+          other = request.header('host')
+        },
+      }),
+      renderer(),
+    ],
+    [page('index')]
+  )
+  // The fake keeps `Host` out of the headers, like Go does
+  MiddlewareHandler(makeEvent('/').e)
+  expect(host).toBe('example.test')
+  expect(other).toBe('example.test')
+})
+
+test('HEAD runs what GET runs, so that what guards GET guards HEAD', () => {
+  const dir = tempDir('pp-head-')
+  const get = path.join(dir, '+get.js')
+  const load = path.join(dir, '+load.js')
+  writeFileSync(
+    get,
+    `module.exports = () => { globalThis.__ran.push('get'); return { fromGet: true } }`
+  )
+  writeFileSync(
+    load,
+    `module.exports = () => { globalThis.__ran.push('load'); return { fromLoad: true } }`
+  )
+  const post = path.join(dir, '+post.js')
+  writeFileSync(
+    post,
+    `module.exports = () => { globalThis.__ran.push('post'); return {} }`
+  )
+  g.__ran = []
+  configure([renderer()], [page('index', { loaders: { get, load, post } })])
+  for (const method of ['GET', 'HEAD', 'POST']) {
+    g.__ran = []
+    MiddlewareHandler(makeEvent('/', method).e)
+    expect([method, ...g.__ran]).toEqual(
+      method === 'POST' ? ['POST', 'load', 'post'] : [method, 'load', 'get']
+    )
+  }
+})

@@ -71,6 +71,7 @@ Pocketpages runs as a PocketBase hook, inside the PocketPage JSVM which is power
 - [env](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/env.md): Access environment variables
 - [secret / sign / unsign](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/secret.md): Keys and signatures that belong to your app
 - [pathMatcher](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/path-matcher.md): Match URL paths against patterns like /admin/**
+- [canonicalPath](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/canonical-path.md): The address of the page that serves a URL path
 - [store](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/store.md): Persistent key-value store
 - [stringify](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/stringify.md): JSON serialization helper
 - [url](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/url.md): URL construction and parsing helpers

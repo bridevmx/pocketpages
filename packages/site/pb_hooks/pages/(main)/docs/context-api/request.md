@@ -30,6 +30,11 @@ description: Access HTTP request details including method, headers, and query pa
 - Type: `string`
 - Description: The path of the URL, `/blog/a-post`, without the query string. Cheaper than `url.pathname`, which has the whole URL parsed. It follows `url` when a plugin replaces it.
 
+### `canonicalPath`
+
+- Type: `string`
+- Description: The address of the page that serves the request. A page answers at more than one address: `pages/account/index.ejs` at `/account`, `/account/index` and `/account/index/anything`; `pages/dashboard.ejs` at `/dashboard` and everything below it. `canonicalPath` is `/account` or `/dashboard` for all of them (and `pathname` itself when no page serves the request). Rules about who may go where have to hold for it as well as for `pathname`, or `/account/index` would not be covered by a rule for `/account`. It follows `url` when a plugin replaces it.
+
 ### `ip`
 
 - Type: `string`
@@ -63,7 +68,7 @@ description: Access HTTP request details including method, headers, and query pa
 ### `header()`
 
 - Type: `(name: string) => string`
-- Description: Function that returns the value of the specified request header. Returns empty string if header not found.
+- Description: Function that returns the value of the specified request header. Returns empty string if header not found. `header('Host')` works: the host of the request is not among the headers in Go, and PocketPages looks it up where it is.
 
 ### `cookies`
 

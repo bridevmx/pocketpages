@@ -203,6 +203,41 @@ export const matchRoute = (
 }
 
 /**
+ * The address a route is known by: `/account` for requests to `/account`, `/account/index`
+ * and `/account/anything`, with the values of its `[param]` segments in place.
+ *
+ * Several URLs lead to one route: the path may continue past the segments of the route,
+ * `index` can be spelled out, and static files also answer to their fingerprinted name.
+ * Rules about who may go where have to hold for this address as well as for the URL, or
+ * `/account/index` would not be covered by a rule for `/account`.
+ */
+export const canonicalPathOf = (match: RouteMatch): string => {
+  const { segments } = match.route
+  // A `[param]` that found no part in the path leaves the address shorter
+  const used = match.parts.slice(0, segments.length)
+  if (used.length === segments.length && used.length > 0) {
+    const last = segments[segments.length - 1]!
+    if (match.route.isStatic) {
+      used[used.length - 1] = last.nodeName
+    } else if (!last.paramName && last.nodeName === 'index') {
+      used.pop()
+    }
+  }
+  return '/' + used.join('/')
+}
+
+/**
+ * `canonicalPathOf()` for a URL path: the path itself when no route claims it
+ */
+export const canonicalPathFor = (
+  index: RouteIndex,
+  pathname: string
+): string => {
+  const match = matchRoute(index, pathname)
+  return match ? canonicalPathOf(match) : pathname
+}
+
+/**
  * Copies the values of the `[param]` segments of a matched route into `params`.
  */
 export const applyPathParams = (match: RouteMatch, params: PagesParams) => {

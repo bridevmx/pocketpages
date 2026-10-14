@@ -14,7 +14,12 @@ import {
 import { echo, mkMeta, mkResolve, pagesRoot } from '../lib/helpers'
 import { couldBeJson, tryParseJson } from '../lib/json'
 import { getPlugins } from '../lib/loadPlugins'
-import { applyPathParams, matchRoute, RouteMatch } from '../lib/resolveRoute'
+import {
+  applyPathParams,
+  canonicalPathOf,
+  matchRoute,
+  RouteMatch,
+} from '../lib/resolveRoute'
 import { createResponse } from '../lib/response'
 import { parseSlots } from '../lib/slots'
 import {
@@ -118,6 +123,7 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
    * The request URL is only parsed when something asks for it
    */
   let parsedUrl: Url | undefined
+  let canonical: { match: RouteMatch; path: string } | undefined
   const request: PagesRequest = {
     event: e,
     auth: e.auth,
@@ -125,6 +131,13 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
     state: {},
     get pathname() {
       return parsedUrl ? parsedUrl.pathname : pathname!
+    },
+    get canonicalPath() {
+      if (!match) return request.pathname
+      if (!canonical || canonical.match !== match) {
+        canonical = { match, path: canonicalPathOf(match) }
+      }
+      return canonical.path
     },
     get ip() {
       return e.realIP()
@@ -147,7 +160,12 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
     formData: () => e.requestInfo().body,
     body: () => e.requestInfo().body,
     header: (name: string) => {
-      return e.request?.header.get(name) || ''
+      const value = e.request?.header.get(name) || ''
+      // Go keeps the host of the request out of the headers
+      if (value === '' && name.length === 4 && name.toLowerCase() === 'host') {
+        return e.request?.host || ''
+      }
+      return value
     },
     cookies: (() => {
       let parsed: Record<string, any>
@@ -369,9 +387,12 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
 
     function done() {
       // Execute loaders. Plugins may have changed the method, the way a form that
-      // can only POST asks for a DELETE.
+      // can only POST asks for a DELETE. HEAD is a GET without the body: it runs what a
+      // GET runs, or whatever the loaders of GET guard would not be guarding it.
       {
-        const methods = ['load', request.method.toLowerCase(), request.method]
+        const verb =
+          request.method === 'HEAD' ? 'get' : request.method.toLowerCase()
+        const methods = ['load', verb]
         forEach(methods, (method) => {
           const loaderFname =
             route.loaders[method as keyof typeof route.loaders]

@@ -1,8 +1,10 @@
 import * as log from 'pocketbase-log'
 import { stringify } from 'pocketbase-stringify'
 import { default as parse } from 'url-parse'
+import { getCache } from './cache'
 import { couldBeJson } from './json'
 import { pathMatcher } from './pathMatch'
+import { canonicalPathFor } from './resolveRoute'
 import { secret, sign, unsign } from './secret'
 import { PagesGlobalContext } from './types'
 
@@ -32,6 +34,8 @@ export const globalApi: PagesGlobalContext = {
   sign,
   unsign,
   pathMatcher,
+  canonicalPath: (pathname: string) =>
+    canonicalPathFor(getCache().index, pathname),
   store: (name: string, value?: any) => {
     if (value === undefined) {
       return $app.store<any>().get(name)

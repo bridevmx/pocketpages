@@ -197,7 +197,9 @@ Supported method-specific middleware files:
 - `+patch.js`
 - `+delete.js`
 
-These files follow the same hierarchical execution order as `+middleware.js`.
+Unlike `+middleware.js`, they do not cascade down the folders: like `+load.js`, only the file next to the page runs, after the middleware, and `+load.js` runs before it. A `HEAD` request runs what a `GET` runs (it is a `GET` without the body).
+
+A method loader is not the place for a check that has to hold for the whole page: it only runs for its own methods. Put those in `+middleware.js`, or in the rules of an access control plugin such as [RBAC](/docs/plugins/rbac).
 
 ## Reference
 

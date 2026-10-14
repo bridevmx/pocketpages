@@ -239,7 +239,7 @@ module.exports = function (api) {
 ### Available Method Loaders
 
 - `+load.js` - Runs for all HTTP methods
-- `+get.js` - GET requests only
+- `+get.js` - GET requests (and HEAD, which is a GET without the body)
 - `+post.js` - POST requests only
 - `+put.js` - PUT requests only
 - `+patch.js` - PATCH requests only

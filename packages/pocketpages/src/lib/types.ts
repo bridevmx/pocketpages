@@ -49,6 +49,13 @@ export type PagesGlobalContext = {
    * `/blog`, `/blog/` and `/blog/2024/a-post`. Make it once, not for every request.
    */
   pathMatcher: (patterns: string | string[]) => (pathname: string) => boolean
+  /**
+   * The address of the page that serves a URL path: `/account` for `/account/index` or
+   * `/account/anything`. Several URLs lead to the same page, so rules about who may
+   * go where have to be checked against this too. Paths no page serves are returned as
+   * they are.
+   */
+  canonicalPath: (pathname: string) => string
 } & typeof log
 
 export type ResolveOptions = {
@@ -238,6 +245,13 @@ export type PagesRequest = {
    */
   readonly pathname: string
   /**
+   * The address of the page that serves this request: `/account` for requests to
+   * `/account`, `/account/index` and `/account/anything`. Equal to `pathname` when no
+   * page does. Access rules have to hold for it as well as for `pathname`, since both
+   * lead to the page. It follows `url` when a plugin replaces it.
+   */
+  readonly canonicalPath: string
+  /**
    * The address of the client, as PocketBase works it out. It looks at the headers of
    * the proxies you list as trusted in the settings, and at nothing else.
    */
@@ -247,6 +261,7 @@ export type PagesRequest = {
   url: Url
   formData: () => Record<string, any>
   body: () => Record<string, any> | string
+  /** The value of a request header, `''` if there is none. `Host` works too. */
   header: (name: string) => string
   cookies: {
     (): Record<string, string | undefined>

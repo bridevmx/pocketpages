@@ -88,6 +88,7 @@ The Global API provides these core utility functions:
 - **Paths**
 
   - `pathMatcher(patterns)` - A function that tells whether a URL path matches patterns like `/admin/**`
+  - `canonicalPath(pathname)` - The address of the page that serves a URL path (`/account` for `/account/index`)
 
 - **Logging**
   - `dbg()` - Debug level logging

@@ -66,6 +66,7 @@
 - [env](/docs/global-api/env)
 - [secret, sign, unsign](/docs/global-api/secret)
 - [pathMatcher](/docs/global-api/path-matcher)
+- [canonicalPath](/docs/global-api/canonical-path)
 - [store](/docs/global-api/store)
 - [stringify](/docs/global-api/stringify)
 - [url](/docs/global-api/url)
