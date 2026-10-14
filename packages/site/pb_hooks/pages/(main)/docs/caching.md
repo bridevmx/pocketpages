@@ -170,3 +170,7 @@ module.exports = function (api) {
 - [asset() Documentation](/docs/api/asset)
 - [Middleware Guide](/docs/middleware)
 - [Cloudflare Cache Documentation](https://developers.cloudflare.com/cache)
+
+## Caching Pages
+
+What is described here is about files: templates, partials and modules that PocketPages does not need to read again. To keep **rendered pages** and send them again without running them, use the [page cache plugin](/docs/plugins/page-cache).
