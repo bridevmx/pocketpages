@@ -26,6 +26,15 @@ module.exports = {
 
 - **`extensions`**: Array of file extensions to process (default: `['.ejs']`)
 - **`debug`**: Enable debug output for the plugin (default: `false`)
+- **`cache`**: Compile each template once and remember where `include()`s were found, instead of reading and compiling the files again on every request (default: the `cache` setting in `+config.js`, which is `true` unless PocketBase runs with `--dev`)
+
+## Performance
+
+Templates are compiled the first time they are rendered and kept for as long as the app runs. This is by far the biggest saving when serving pages: reading and compiling a template takes longer than rendering it.
+
+- Edits to templates and partials show up after PocketBase restarts. PocketBase does this by itself when `pb_hooks` changes (`--hooksWatch`, on by default, except on Windows). With `--dev` nothing is kept, so edits show up on the next request.
+- Set `cache: false` on the plugin, or in `+config.js` to turn caching off for every plugin, if you change template files while the app is running and PocketBase is not restarting.
+- Large pages are rendered in linear time. The output of a template is assembled from a list of chunks instead of being appended to one ever-growing string, which in the PocketBase JavaScript runtime copies the whole string every time.
 
 ## Features
 
