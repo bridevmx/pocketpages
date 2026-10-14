@@ -149,7 +149,11 @@ const authPluginFactory: PluginFactory = (config) => {
 
   return {
     name: 'auth',
-    onRequest: ({ request, response }) => {
+    onRequest: ({ request, response, route }) => {
+      // Static files and requests PocketPages is not going to render (the PocketBase
+      // API, the admin UI...) never look at the signed in user, so there is no point in
+      // validating the cookie for them. Older versions of PocketPages do not tell.
+      if (route === null || route?.isStatic) return
       const { auth } = request
       if (auth) {
         dbg(`skipping cookie auth because auth record already set: ${auth.id}`)

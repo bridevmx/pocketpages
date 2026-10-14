@@ -37,6 +37,9 @@ const jsSdkPluginFactory: PluginFactory<JSSdkPluginOptions> = (
     return pb
   }
 
+  // Clients are reused while a request is being served. Plugins are only created once per
+  // runtime, so the cache has to be emptied for each request (see onExtendContextApi):
+  // auth tokens do not outlive a request, and the cache must not grow forever.
   const pbCache = new Map<string, PocketBase>()
 
   globalApi.pb = (options?: Partial<PocketBaseClientOptions>) => {
@@ -55,6 +58,9 @@ const jsSdkPluginFactory: PluginFactory<JSSdkPluginOptions> = (
 
   return {
     name: 'js-sdk',
+    onExtendContextApi: () => {
+      pbCache.clear()
+    },
   }
 }
 
