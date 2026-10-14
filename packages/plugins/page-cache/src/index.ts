@@ -8,6 +8,7 @@ import {
   buildKey,
   cacheControlFor,
   cookiesAllowCaching,
+  hasFlash,
   parseHeaders,
   QueryRule,
   serializeHeaders,
@@ -166,6 +167,7 @@ const pageCachePluginFactory: PluginFactory<PageCacheOptions> = (
     options.exclude.length > 0
       ? globalApi.pathMatcher(options.exclude)
       : () => false
+  const isCacheable = (path: string) => isIncluded(path) && !isExcluded(path)
   const cacheControl = cacheControlFor(options.ttl, options.browserMaxAge)
   let lastSweep = Date.now()
 
@@ -207,14 +209,76 @@ const pageCachePluginFactory: PluginFactory<PageCacheOptions> = (
     }
   }
 
+  /** Keeps the page that was made, if it is one for everybody */
+  const keep = (
+    request: PagesRequest,
+    response: PagesResponse,
+    state: State,
+    content: string
+  ) => {
+    const raw = request.event.response
+    const why = whyNotCacheable({
+      status: response.status(),
+      contentType: response.header('Content-Type') ?? '',
+      sent: response.sent(),
+      setsCookie: !!raw.header().get('Set-Cookie'),
+      cacheControl: response.header('Cache-Control') ?? '',
+      vary: Array.from(raw.header().values('Vary')).join(', '),
+      skipped: state.skipped,
+      hasNonce: !!request.state.security?.nonce,
+      bytes: content.length,
+      maxBytes: options.maxBodyBytes,
+    })
+    if (why) {
+      dbg(`page cache: ${request.pathname} not kept, ${why}`)
+      state.status = 'BYPASS'
+      if (options.header) response.header('X-Cache', 'BYPASS')
+      return
+    }
+    if (options.header) response.header('X-Cache', 'MISS')
+
+    const kept: Array<[string, string]> = []
+    for (const name of options.headers) {
+      const value = response.header(name)
+      if (value) kept.push([name, value])
+    }
+    const now = Date.now()
+    const entry: Entry = {
+      body: content,
+      etag: `"${$security.md5(content)}"`,
+      created: now,
+      expires: now + options.ttl * 1000,
+      tags: state.tags.join(','),
+      gens: [...state.gens, state.global].join(','),
+      headers: serializeHeaders(kept),
+    }
+    store.save(state.key, entry)
+    response.header('ETag', entry.etag)
+    if (!response.header('Cache-Control'))
+      response.header('Cache-Control', cacheControl)
+    response.addHeader('Vary', 'Cookie')
+    for (const name of options.vary) response.addHeader('Vary', name)
+  }
+
   return {
     name: 'page-cache',
 
     onRequest: ({ request, response, route }) => {
       if (!active || !route || route.isStatic) return
       if (request.method !== 'GET' && request.method !== 'HEAD') return
-      const path = request.event.request!.url!.path
-      if (!isIncluded(request.pathname) || isExcluded(request.pathname)) return
+      // A page is known by more than one address (`/blog` and `/blog/index`): both have
+      // to be ones to keep
+      if (
+        !isCacheable(request.pathname) ||
+        !isCacheable(request.canonicalPath ?? request.pathname)
+      ) {
+        return
+      }
+      const raw = request.event.request!
+      const url = raw.url!
+      // What the visitor asked for, as they asked for it: `/es/blog`, not the `/blog`
+      // that a plugin made of it, and `/a%2Fb`, which is not `/a/b`
+      const path = url.escapedPath ? url.escapedPath() : url.path
 
       const bypass = (why: string) => {
         dbg(`page cache: ${path} bypassed, ${why}`)
@@ -227,12 +291,14 @@ const pageCachePluginFactory: PluginFactory<PageCacheOptions> = (
       }
       if (request.header('Authorization') || request.auth)
         return bypass('signed in')
+      // A message for the visitor who was sent here with it, not for the next one
+      if (hasFlash(url.rawQuery)) return bypass('flash message')
 
       const key = buildKey({
         method: 'GET',
-        host: request.header('Host'),
+        host: request.header('Host') || raw.host || '',
         path,
-        rawQuery: request.event.request!.url!.rawQuery,
+        rawQuery: url.rawQuery,
         query: options.query,
         vary: options.vary.map((name) => request.header(name)),
       })
@@ -245,6 +311,19 @@ const pageCachePluginFactory: PluginFactory<PageCacheOptions> = (
         request.state.pageCache = { status: 'HIT' }
         send(request, response, entry, now)
         return true
+      }
+
+      // A HEAD request does not run what a GET runs for the body, only GET is kept
+      if (request.method !== 'GET') return bypass('only GET is kept')
+
+      // The page is made from what the key is made of, and from nothing else: a
+      // parameter that is not in the key can't change the page that is kept for it
+      if (options.query !== 'all') {
+        const query = request.url.query as Record<string, unknown>
+        const allowed = options.query === 'none' ? [] : options.query
+        for (const name of Object.keys(query)) {
+          if (allowed.indexOf(name) === -1) delete query[name]
+        }
       }
 
       // A miss: the page is made, and kept if it turns out to be one for everybody
@@ -264,49 +343,10 @@ const pageCachePluginFactory: PluginFactory<PageCacheOptions> = (
       const { request, response } = api
       const state = request.state.pageCache as State | undefined
       if (!state || state.status !== 'MISS') return
-
-      const raw = request.event.response
-      const why = whyNotCacheable({
-        status: response.status(),
-        contentType: response.header('Content-Type') ?? '',
-        sent: response.sent(),
-        setsCookie: !!raw.header().get('Set-Cookie'),
-        cacheControl: response.header('Cache-Control') ?? '',
-        vary: Array.from(raw.header().values('Vary')).join(', '),
-        skipped: state.skipped,
-        hasNonce: !!request.state.security?.nonce,
-        bytes: content.length,
-        maxBytes: options.maxBodyBytes,
-      })
-      if (options.header) response.header('X-Cache', 'MISS')
-      if (why) {
-        dbg(`page cache: ${request.pathname} not kept, ${why}`)
-        state.status = 'BYPASS'
-        if (options.header) response.header('X-Cache', 'BYPASS')
-        return
-      }
-
-      const kept: Array<[string, string]> = []
-      for (const name of options.headers) {
-        const value = response.header(name)
-        if (value) kept.push([name, value])
-      }
-      const now = Date.now()
-      const entry: Entry = {
-        body: content,
-        etag: `"${$security.md5(content)}"`,
-        created: now,
-        expires: now + options.ttl * 1000,
-        tags: state.tags.join(','),
-        gens: [...state.gens, state.global].join(','),
-        headers: serializeHeaders(kept),
-      }
-      store.save(state.key, entry)
-      response.header('ETag', entry.etag)
-      if (!response.header('Cache-Control'))
-        response.header('Cache-Control', cacheControl)
-      response.addHeader('Vary', 'Cookie')
-      for (const name of options.vary) response.addHeader('Vary', name)
+      // Whether the page can be kept is known when it is about to go out, after the
+      // things that set a cookie or a header on the way (a session that changed, the
+      // CSP) have done it
+      response.beforeSend(() => keep(request, response, state, content))
     },
 
     onExtendContextApi: ({ api }) => {

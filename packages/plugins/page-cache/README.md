@@ -48,10 +48,11 @@ Nothing is kept with `--dev`, where files change under the cache. Set `dev: true
 
 A page is served from the cache, and added to it, when **all** of this is true:
 
-- the request is a `GET` (or `HEAD`) for a page, not a file, and its address matches `include` and not `exclude`
+- the request is a `GET` for a page, not a file, and its address, and the address of the page that serves it (`/blog` for `/blog/index`), match `include` and not `exclude`. A `HEAD` request is answered from the cache when the page is there, but never adds one: it does not run what a `GET` runs for the body.
+- the address does not carry a `__flash` message, the one PocketPages adds when it redirects with a message: it is for the visitor who was sent there
 - the request has **no cookies** (except those you list in `ignoreCookies`), no `Authorization` header, and nobody is signed in
 - the page is answered with `200`, as HTML, without having sent anything else (a redirect, `echo()`...)
-- the page **sets no cookie**: a form with a CSRF token or a flash message does, and so is left out
+- the page **sets no cookie**: a form with a CSRF token, or a page that changes the [session](/docs/plugins/session) or leaves a session flash message, does, and so is left out. This is checked when the response is about to go out, so a cookie that is set late is seen too.
 - the page does not say `Cache-Control: private`, `no-store` or `no-cache`, and does not call `pageCache.skip()`
 - it does not use `csp.nonce` of the [security plugin](/docs/plugins/security) (a nonce is different for every visitor)
 - it is not larger than `maxBodyBytes` (256 KB)
@@ -79,6 +80,8 @@ query: ['page', 'q'] // the page depends on these parameters only: the others (u
 query: 'none' // the page does not depend on the query string
 ```
 
+With a list or `'none'`, the page is made from the parameters in the list and from nothing else: the others are taken out of `request.url.query` (and so out of `params`) before the page runs, so a parameter that is not in the key can never change a page that is kept for it. A page that reads the query string some other way (`event.requestInfo()`, say) gets all of it, and should not be cached with a list. Names and values are read the way pages read them, decoded: `?%70age=7` is `?page=7`, and a name that comes twice has the value of the first.
+
 Addresses over 512 characters are never kept.
 
 ### Variants
@@ -89,7 +92,7 @@ If a page depends on a request header, say so, and each value gets its own copy:
 vary: ['Accept-Language']
 ```
 
-Pages also vary by `Host`, so one app can serve several domains.
+Pages also vary by `Host`, so one app can serve several domains, and by the address as it was asked for: `/a%2Fb` and `/a/b` are two pages.
 
 ## Purging
 

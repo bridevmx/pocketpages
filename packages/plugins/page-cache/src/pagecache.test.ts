@@ -3,8 +3,10 @@ import {
   buildKey,
   cacheControlFor,
   cookiesAllowCaching,
+  hasFlash,
   matchesName,
   parseHeaders,
+  parseQuery,
   serializeHeaders,
   whyNotCacheable,
 } from './rules'
@@ -248,7 +250,7 @@ test('keys tell pages apart', () => {
       rawQuery: 'utm=1&q=a&flag&page=2',
       query: ['q', 'page', 'flag'],
     })
-  ).toBe('GET\nexample.com\n/blog?flag&page=2&q=a\n')
+  ).toBe('GET\nexample.com\n/blog?flag=&page=2&q=a\n')
   expect(buildKey({ ...base, rawQuery: 'utm=1', query: ['q'] })).toBe(
     'GET\nexample.com\n/blog\n'
   )
@@ -335,4 +337,60 @@ test('headers kept with a page', () => {
   ])
   expect(parseHeaders('')).toEqual([])
   expect(parseHeaders('nonsense\n: x')).toEqual([])
+})
+
+// --- keys are made of what pages read
+
+test('queries are read the way pages read them', () => {
+  expect(parseQuery('a=1&b=2')).toEqual([
+    ['a', '1'],
+    ['b', '2'],
+  ])
+  // Names and values are decoded, and + is a space
+  expect(parseQuery('%70age=7&q=a+b%20c')).toEqual([
+    ['page', '7'],
+    ['q', 'a b c'],
+  ])
+  // The first value of a name is the one pages get
+  expect(parseQuery('page=3&page=2&%70age=9')).toEqual([['page', '3']])
+  // What can't be decoded is not there for pages either
+  expect(parseQuery('a=%E0%A4%A&b=1')).toEqual([['b', '1']])
+  expect(parseQuery('')).toEqual([])
+})
+
+test('the same page has the same key however the query is written', () => {
+  const base = {
+    method: 'GET',
+    host: 'example.com',
+    path: '/blog',
+    vary: [],
+    query: ['page'] as string[],
+  }
+  const key = (rawQuery: string) => buildKey({ ...base, rawQuery })
+  expect(key('%70age=7')).toBe(key('page=7'))
+  expect(key('%70age=7&page=2')).toBe(key('page=7'))
+  expect(key('page=3&page=2')).not.toBe(key('page=2&page=3'))
+  expect(key('page=3&page=2')).toBe(key('page=3'))
+  expect(key('utm=1&%75tm=2')).toBe(key(''))
+  expect(key('page=a b')).toBe(key('page=a+b'))
+  expect(key('page=7')).not.toBe(key(''))
+})
+
+test('messages for one visitor are recognised however they are written', () => {
+  expect(hasFlash('__flash=Hi')).toBe(true)
+  expect(hasFlash('a=1&__flash=')).toBe(true)
+  expect(hasFlash('%5F%5Fflash=Hi')).toBe(true)
+  expect(hasFlash('__fla%73h=Hi')).toBe(true)
+  expect(hasFlash('flash=1&_flash=2')).toBe(false)
+  expect(hasFlash('')).toBe(false)
+})
+
+test('the address and the host are part of the key as they were asked for', () => {
+  const base = { method: 'GET', rawQuery: '', query: 'all' as const, vary: [] }
+  expect(buildKey({ ...base, host: 'a.test', path: '/a%2Fb' })).not.toBe(
+    buildKey({ ...base, host: 'a.test', path: '/a/b' })
+  )
+  expect(buildKey({ ...base, host: 'a.test', path: '/' })).not.toBe(
+    buildKey({ ...base, host: 'b.test', path: '/' })
+  )
 })

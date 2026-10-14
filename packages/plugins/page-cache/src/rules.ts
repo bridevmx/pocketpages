@@ -33,9 +33,53 @@ export const cookiesAllowCaching = (
 
 export type QueryRule = 'all' | 'none' | string[]
 
+/** The parameter PocketPages adds to the address it redirects to, to say something once */
+export const FLASH = '__flash'
+
+const decode = (input: string): string | null => {
+  try {
+    return decodeURIComponent(input.replace(/\+/g, ' '))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Reads a query string the way pages get it (`request.url.query`): names and values
+ * decoded, pairs that can't be decoded left out, and a name that comes twice keeps the
+ * first value. The key of a page has to be made of what the page reads, not of how the
+ * visitor wrote it: `?%70age=7` is `?page=7` to the page.
+ */
+export const parseQuery = (rawQuery: string): Array<[string, string]> => {
+  const pairs: Array<[string, string]> = []
+  const seen = new Map<string, true>()
+  const parser = /([^=?#&]+)=?([^&]*)/g
+  let part: RegExpExecArray | null
+  while ((part = parser.exec(rawQuery))) {
+    const name = decode(part[1]!)
+    const value = decode(part[2]!)
+    if (name === null || value === null || seen.has(name)) continue
+    seen.set(name, true)
+    pairs.push([name, value])
+  }
+  return pairs
+}
+
+/** Whether the visitor was sent here with a message to show once, which is nobody else's */
+export const hasFlash = (rawQuery: string): boolean => {
+  if (!rawQuery) return false
+  const pairs = parseQuery(rawQuery)
+  for (let i = 0; i < pairs.length; i++) {
+    if (pairs[i]![0] === FLASH) return true
+  }
+  return false
+}
+
 export type KeyParts = {
   method: string
+  /** The host the request was made to */
   host: string
+  /** The path as it was asked for, still encoded (`/a%2Fb` is not `/a/b`) */
   path: string
   rawQuery: string
   query: QueryRule
@@ -56,12 +100,12 @@ export const buildKey = (parts: KeyParts): string | undefined => {
     query = parts.rawQuery ? `?${parts.rawQuery}` : ''
   } else if (Array.isArray(parts.query) && parts.rawQuery) {
     const wanted = parts.query
-    const kept = parts.rawQuery
-      .split('&')
-      .filter((pair) => {
-        const eq = pair.indexOf('=')
-        return wanted.indexOf(eq === -1 ? pair : pair.slice(0, eq)) !== -1
-      })
+    const kept = parseQuery(parts.rawQuery)
+      .filter(([name]) => wanted.indexOf(name) !== -1)
+      .map(
+        ([name, value]) =>
+          `${encodeURIComponent(name)}=${encodeURIComponent(value)}`
+      )
       .sort()
     query = kept.length > 0 ? `?${kept.join('&')}` : ''
   }
