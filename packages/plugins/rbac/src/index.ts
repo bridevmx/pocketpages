@@ -1,0 +1,224 @@
+import type {
+  PagesRequest,
+  PluginFactory,
+  PluginOptionsBase,
+} from 'pocketpages'
+import {
+  AccessRule,
+  compileRules,
+  decide,
+  Decision,
+  rolesOf,
+  safeNext,
+  Subject,
+} from './rules'
+
+export { safeNext } from './rules'
+export type { AccessRule, Decision, Subject } from './rules'
+
+export type RbacOptions = PluginOptionsBase & {
+  /** Who may go where. The first rule that covers a request decides. */
+  rules: AccessRule[]
+  /** The field of the user with its role (or roles), `role` unless told otherwise */
+  roleField: string
+  /**
+   * Where visitors who have to sign in are sent, `/login` unless told otherwise.
+   * `false` leaves them with a 401.
+   */
+  loginPath: string | false
+  /** The parameter that carries the page to come back to, `next` unless told otherwise */
+  nextParam: string
+  /** What to say on the login page, if the session plugin is there to carry it */
+  loginMessage: string
+  /** Where signed in visitors who are not allowed are sent, instead of getting a 403 */
+  forbiddenPath: string
+  /** Where signed in visitors who have not confirmed their email address are sent, instead of getting a 403 */
+  unverifiedPath: string
+}
+
+const VALID_KEYS = [
+  'debug',
+  'rules',
+  'roleField',
+  'loginPath',
+  'nextParam',
+  'loginMessage',
+  'forbiddenPath',
+  'unverifiedPath',
+]
+
+/** What pages get as `rbac` */
+export type Rbac = {
+  /** The roles of the signed in user, `[]` for visitors */
+  roles: () => string[]
+  /** Whether the user has at least one of these roles */
+  hasRole: (...roles: string[]) => boolean
+  /**
+   * Whether the rules would let the user make a request to `path`: to show the links
+   * that lead somewhere the user can go, say
+   */
+  can: (path: string, method?: string) => boolean
+  /** Throws a 401 for visitors who are not signed in, which sends them to the login page */
+  requireAuth: () => void
+  /** Throws a 401 for visitors, a 403 for users who have none of these roles */
+  requireRole: (...roles: string[]) => void
+  /** `/login?next=...` for the page the visitor is on */
+  loginUrl: (next?: string) => string
+}
+
+const prefersJson = (accept: string) => {
+  const lower = accept.toLowerCase()
+  return (
+    (lower.indexOf('application/json') !== -1 ||
+      lower.indexOf('+json') !== -1) &&
+    lower.indexOf('text/html') === -1
+  )
+}
+
+const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
+  const { globalApi, dbg } = config
+
+  Object.keys(extra).forEach((key) => {
+    if (!VALID_KEYS.includes(key)) {
+      throw new Error(`pocketpages-plugin-rbac: unknown option '${key}'`)
+    }
+  })
+
+  const options = {
+    rules: [] as AccessRule[],
+    roleField: 'role',
+    loginPath: '/login' as string | false,
+    nextParam: 'next',
+    loginMessage: '',
+    forbiddenPath: '',
+    unverifiedPath: '',
+    ...extra,
+  }
+  const rules = compileRules(options.rules, globalApi.pathMatcher)
+
+  const subjectOf = (request: PagesRequest): Subject => {
+    const auth = request.auth
+    if (!auth) return { signedIn: false, roles: [], verified: false }
+    let superuser = false
+    try {
+      superuser = auth.collection().name === '_superusers'
+    } catch {
+      // Not a record we can tell the collection of
+    }
+    return {
+      signedIn: true,
+      roles: rolesOf(auth.get(options.roleField), superuser),
+      verified: superuser || auth.get('verified') === true,
+    }
+  }
+
+  /** Where the visitor is, as they asked for it */
+  const hereOf = (request: PagesRequest) => {
+    const url = request.event.request!.url!
+    return url.rawQuery ? `${url.path}?${url.rawQuery}` : url.path
+  }
+
+  /**
+   * The page in the language of the visitor, when the i18n plugin has a say
+   */
+  const localized = (request: PagesRequest, path: string) =>
+    (request.state.i18n?.path?.(path) as string | undefined) ?? path
+
+  const loginUrlFor = (request: PagesRequest, next?: string) => {
+    const login = localized(request, options.loginPath || '/login')
+    if (!options.nextParam) return login
+    const target = safeNext(next ?? hereOf(request), '/')
+    return `${login}${login.indexOf('?') === -1 ? '?' : '&'}${options.nextParam}=${encodeURIComponent(target)}`
+  }
+
+  /**
+   * Says no. The decision is left in `request.state.rbac` for the `onError` hook, which
+   * is what sends visitors to a page instead of showing them an error.
+   */
+  const refuse = (
+    request: PagesRequest,
+    decision: Exclude<Decision, 'allow'>
+  ): never => {
+    request.state.rbac = { decision }
+    switch (decision) {
+      case 'unauthenticated':
+        throw new UnauthorizedError('Sign in required')
+      case 'forbidden':
+        throw new ForbiddenError('Not allowed')
+      case 'unverified':
+        throw new ForbiddenError('Email address not confirmed')
+      case 'hidden':
+        throw new NotFoundError()
+    }
+  }
+
+  return {
+    name: 'rbac',
+
+    onRequest: ({ request, route }) => {
+      // Requests PocketPages does not serve are for PocketBase, and its own rules
+      if (!route || rules.length === 0) return
+      const decision = decide(
+        rules,
+        subjectOf(request),
+        request.method,
+        request.pathname
+      )
+      if (decision === 'allow') return
+      dbg(`${decision}: ${request.method} ${request.pathname}`)
+      refuse(request, decision)
+    },
+
+    onError: ({ status, request, response, route }) => {
+      // Only pages are answered with a page. JSON clients and PocketBase's API keep
+      // their status codes.
+      if (!route || prefersJson(request.header('Accept'))) return
+
+      let target: string | undefined
+      if (status === 401) {
+        if (options.loginPath === false) return
+        target = loginUrlFor(request)
+        if (options.loginMessage && request.pathname !== options.loginPath) {
+          request.state.session?.flash?.('info', options.loginMessage)
+        }
+      } else if (status === 403) {
+        const unverified = request.state.rbac?.decision === 'unverified'
+        target =
+          (unverified && options.unverifiedPath) ||
+          options.forbiddenPath ||
+          undefined
+      }
+      // Already where they would be sent: doing it again would never end
+      if (!target || request.pathname === target.split('?')[0]) return
+      if (status === 403) target = localized(request, target)
+
+      const safe = request.method === 'GET' || request.method === 'HEAD'
+      response.redirect(target, safe ? 302 : 303)
+      return true
+    },
+
+    onExtendContextApi: ({ api }) => {
+      const { request } = api
+      let subject: Subject | undefined
+      const who = () => subject ?? (subject = subjectOf(request))
+
+      const rbac: Rbac = {
+        roles: () => who().roles.slice(),
+        hasRole: (...roles) => roles.some((r) => who().roles.indexOf(r) !== -1),
+        can: (path, method = 'GET') =>
+          decide(rules, who(), method.toUpperCase(), path) === 'allow',
+        requireAuth: () => {
+          if (!who().signedIn) refuse(request, 'unauthenticated')
+        },
+        requireRole: (...roles) => {
+          if (!who().signedIn) refuse(request, 'unauthenticated')
+          if (!rbac.hasRole(...roles)) refuse(request, 'forbidden')
+        },
+        loginUrl: (next) => loginUrlFor(request, next),
+      }
+      api.rbac = rbac
+    },
+  }
+}
+
+export default rbacPluginFactory
