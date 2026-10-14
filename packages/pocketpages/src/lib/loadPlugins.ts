@@ -54,6 +54,8 @@ export const loadPlugins = (cache: Cache): Plugin[] => {
 
         const extra = omit(normalizedPlugin, 'fn') as PluginOptions
 
+        // The factory may log while it is still being built
+        let pluginName = 'plugin'
         const factoryConfig: PluginFactoryConfig = {
           pagesRoot,
           config,
@@ -61,10 +63,11 @@ export const loadPlugins = (cache: Cache): Plugin[] => {
           routes,
           dbg: (...args: any[]) =>
             extra.debug
-              ? globalApi.dbg(`[${plugin.name}]`, ...args)
-              : systemDbg(`[${plugin.name}]`, ...args),
+              ? globalApi.dbg(`[${pluginName}]`, ...args)
+              : systemDbg(`[${pluginName}]`, ...args),
         }
         const plugin = normalizedPlugin.fn(factoryConfig, extra)
+        pluginName = plugin.name
         systemDbg(`loaded plugin ${plugin.name}`)
         return plugin
       } catch (e) {
@@ -73,4 +76,34 @@ export const loadPlugins = (cache: Cache): Plugin[] => {
       }
     }),
   ]
+}
+
+export type LoadedPlugins = {
+  cache: Cache
+  plugins: Plugin[]
+  /** True when at least one plugin wants to see every request */
+  hasOnRequest: boolean
+}
+
+let loaded: LoadedPlugins | undefined
+
+/**
+ * Plugin factories run once per runtime instead of once per request: `require()`ing
+ * them, wiring up their hooks and extending the global API is not free, and nothing
+ * about a plugin changes between requests. `cache` has to be the object returned by
+ * `getCache()`, which is stable for the life of the runtime.
+ */
+export const getPlugins = (cache: Cache): LoadedPlugins => {
+  if (loaded && loaded.cache === cache) {
+    return loaded
+  }
+  const plugins = loadPlugins(cache)
+  loaded = {
+    cache,
+    plugins,
+    hasOnRequest: plugins.some(
+      (plugin) => typeof plugin.onRequest === 'function'
+    ),
+  }
+  return loaded
 }

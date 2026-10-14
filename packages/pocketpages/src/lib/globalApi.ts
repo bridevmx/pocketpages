@@ -1,6 +1,7 @@
 import * as log from 'pocketbase-log'
 import { stringify } from 'pocketbase-stringify'
 import { default as parse } from 'url-parse'
+import { couldBeJson } from './json'
 import { PagesGlobalContext } from './types'
 
 export const globalApi: PagesGlobalContext = {
@@ -9,8 +10,12 @@ export const globalApi: PagesGlobalContext = {
     // Attempt JSON.parse for each query parameter
     const parsedQuery: Record<string, any> = {}
     for (const [key, value] of Object.entries(url.query)) {
+      if (typeof value !== 'string' || !couldBeJson(value)) {
+        parsedQuery[key] = value
+        continue
+      }
       try {
-        parsedQuery[key] = JSON.parse(value as string)
+        parsedQuery[key] = JSON.parse(value)
       } catch {
         // If JSON.parse fails, keep the original string value
         parsedQuery[key] = value

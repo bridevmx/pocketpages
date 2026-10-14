@@ -90,6 +90,11 @@ export type ResponseContext = PluginContextBase & {
 export type RequestContext = {
   request: PagesRequest
   response: PagesResponse
+  /**
+   * The route this request is going to be served by, `null` when none matches (the
+   * request then goes on to PocketBase), and `undefined` if the core could not tell.
+   */
+  route?: Route | null
 }
 
 export type Plugin = {
@@ -129,6 +134,12 @@ export type PluginConfigItemShortHand =
 export type PagesConfig = {
   plugins: PluginConfigItemShortHand[]
   debug: boolean | 'verbose'
+  /**
+   * Remember file lookups and file contents (templates, `resolve()`d modules) instead
+   * of going to the disk on every request. Defaults to `true` unless PocketBase runs
+   * with `--dev`.
+   */
+  cache?: boolean
 }
 
 export type Cache = { routes: Route[]; config: PagesConfig }

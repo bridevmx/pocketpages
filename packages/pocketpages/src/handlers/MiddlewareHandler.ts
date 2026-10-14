@@ -5,12 +5,14 @@ import { error } from 'pocketbase-log'
 import { stringify } from 'pocketbase-stringify'
 import { fingerprint as applyFingerprint } from 'src/lib/fingerprint'
 import { globalApi } from 'src/lib/globalApi'
-import { dbg } from '../lib/debug'
+import { getCache } from '../lib/cache'
+import { dbg, isDebug } from '../lib/debug'
 import { echo, mkMeta, mkResolve, pagesRoot } from '../lib/helpers'
-import { loadPlugins } from '../lib/loadPlugins'
-import { resolveRoute } from '../lib/resolveRoute'
+import { couldBeJson, tryParseJson } from '../lib/json'
+import { getPlugins } from '../lib/loadPlugins'
+import { applyPathParams, matchRoute, RouteMatch } from '../lib/resolveRoute'
+import { parseSlots } from '../lib/slots'
 import {
-  Cache,
   MiddlewareLoaderFunc,
   PagesMethods,
   PagesMiddlewareFunc,
@@ -20,7 +22,11 @@ import {
   PagesResponse,
   Plugin,
   RedirectOptions,
+  Url,
 } from '../lib/types'
+import { quickPathname } from '../lib/url'
+
+export { parseSlots }
 
 const escapeXml = (unsafe: string = '') => {
   return unsafe.replace(/[<>&'"]/g, (c) => {
@@ -41,32 +47,6 @@ const escapeXml = (unsafe: string = '') => {
   })
 }
 
-export const parseSlots = (input: string) => {
-  const regex = /<!--\s*slot:(\w+)\s*-->([\s\S]*?)(?=<!--\s*slot:\w+\s*-->|$)/g
-  const slots: Record<string, string> = {}
-  let lastIndex = 0
-  let cleanedContent = ''
-  let match: RegExpExecArray | null
-
-  while ((match = regex.exec(input)) !== null) {
-    const name = match[1]
-    const content = match[2]?.trim()
-    if (name && content) {
-      slots[name] = content
-      // Add the content between the last match and this slot tag
-      cleanedContent += input.slice(lastIndex, match.index)
-      lastIndex = match.index + match[0].length
-    }
-  }
-  // Add any remaining content after the last slot
-  cleanedContent += input.slice(lastIndex)
-
-  return {
-    slots,
-    content: cleanedContent.trim(),
-  }
-}
-
 const defaultResponder: Plugin = {
   name: 'builtin',
   onResponse: ({ content, api, route }) => {
@@ -75,6 +55,14 @@ const defaultResponder: Plugin = {
     return true
   },
 }
+
+/**
+ * Served for URLs that carry the content hash of the file: they never change, so the
+ * browser and any CDN in front can keep them for good.
+ */
+const IMMUTABLE_CACHE_CONTROL = 'public, max-age=31536000, immutable'
+
+const MAX_REMEMBERED_ASSETS = 5000
 
 export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
   const next: PagesNextFunc = () => {
@@ -94,13 +82,46 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
     return next()
   }
 
-  dbg(`Pages middleware request: ${method} ${url}`)
+  const cache = getCache()
+  const { config, index } = cache
+  const { plugins, hasOnRequest } = getPlugins(cache)
 
+  const rawUrl = url.string()
+  if (isDebug()) {
+    dbg(`Pages middleware request: ${method} ${rawUrl}`)
+  }
+
+  /**
+   * Most requests that reach this middleware are not for a page at all (PocketBase API
+   * calls, the admin UI, files...). When no plugin wants to look at those, a URL that
+   * no route claims goes straight back to PocketBase without building anything.
+   */
+  let pathname = quickPathname(rawUrl)
+  let match: RouteMatch | null | undefined =
+    pathname === undefined ? undefined : matchRoute(index, pathname)
+  if (match === null && !hasOnRequest) {
+    if (isDebug())
+      dbg(`No route matched for ${rawUrl}, passing on to PocketBase`)
+    return next()
+  }
+
+  /**
+   * The request URL is only parsed when something asks for it
+   */
+  let parsedUrl: Url | undefined
   const request: PagesRequest = {
     event: e,
     auth: e.auth,
     method: method.toUpperCase() as PagesMethods,
-    url: globalApi.url(url.string()),
+    get url() {
+      if (!parsedUrl) {
+        parsedUrl = globalApi.url(rawUrl)
+      }
+      return parsedUrl
+    },
+    set url(value: Url) {
+      parsedUrl = value
+    },
     formData: () => e.requestInfo().body,
     body: () => e.requestInfo().body,
     header: (name: string) => {
@@ -108,15 +129,6 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
     },
     cookies: (() => {
       let parsed: Record<string, any>
-
-      const tryParseJson = (value: string | undefined) => {
-        if (!value) return value
-        try {
-          return JSON.parse(value)
-        } catch {
-          return value
-        }
-      }
 
       const cookieFunc = <T = Record<string, any>>(name?: string): T => {
         if (!parsed) {
@@ -164,7 +176,7 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
       if (value === undefined) {
         return e.response.header().get(name) || ''
       }
-      dbg(`header: ${name} ${value}`)
+      if (isDebug()) dbg(`header: ${name} ${value}`)
       e.response.header().set(name, value)
       return value
     },
@@ -189,24 +201,42 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
     },
   }
 
-  const cache = $app.store<Cache>().get(`pocketpages`)
-  const { routes, config } = cache
+  if (pathname === undefined) {
+    // Not a plain path, let the URL parser work out what it is
+    pathname = request.url.pathname
+    match = matchRoute(index, pathname)
+    if (!match && !hasOnRequest) {
+      if (isDebug())
+        dbg(`No route matched for ${rawUrl}, passing on to PocketBase`)
+      return next()
+    }
+  }
 
-  const plugins = loadPlugins(cache)
-  plugins.forEach((plugin) => plugin.onRequest?.({ request, response }))
-
-  const resolvedRoute = resolveRoute(request.url, routes)
+  if (hasOnRequest) {
+    plugins.forEach((plugin) =>
+      plugin.onRequest?.({
+        request,
+        response,
+        route: match ? match.route : null,
+      })
+    )
+    // A plugin may have rewritten the URL to send the request somewhere else
+    if (parsedUrl && parsedUrl.pathname !== pathname) {
+      match = matchRoute(index, parsedUrl.pathname)
+    }
+  }
 
   /**
    * If it doesn't match any known route, pass it on
    */
-  if (!resolvedRoute) {
+  if (!match) {
     // Otherwise, pass it on to PocketBase to handle
-    dbg(`No route matched for ${url}, passing on to PocketBase`)
+    if (isDebug())
+      dbg(`No route matched for ${rawUrl}, passing on to PocketBase`)
     return next()
   }
 
-  const { route, params } = resolvedRoute
+  const { route } = match
   const { absolutePath, relativePath } = route
 
   try {
@@ -214,7 +244,10 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
      * If the file exists but no plugin handles it, serve statically
      */
     if (route.isStatic) {
-      dbg(`Serving static file ${absolutePath}`)
+      if (isDebug()) dbg(`Serving static file ${absolutePath}`)
+      if (match.fingerprinted && !response.header('Cache-Control')) {
+        response.header('Cache-Control', IMMUTABLE_CACHE_CONTROL)
+      }
       return response.file(absolutePath)
     }
 
@@ -223,13 +256,17 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
     */
     // dbg(`Found a matching route`, { resolvedRoute })
 
+    // The query string (and the values of any [param] segments)
+    const params = request.url.query
+    applyPathParams(match, params)
+
     const api: PagesRequestContext<any> = {
       ...globalApi,
       params,
       echo: (...args) => {
         const s = echo(...args)
         response.write(s)
-        dbg(`echo: ${s}`)
+        if (isDebug()) dbg(`echo: ${s}`)
         return s
       },
       formData: request.formData,
@@ -250,6 +287,11 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
       slot: '',
       slots: {},
       asset: (path) => {
+        // What asset() returns depends on the route and the path only
+        const assetKey = `${relativePath}\0${path}`
+        const known = cache.assets.get(assetKey)
+        if (known !== undefined) return known
+
         const shortAssetPath = path.startsWith('/')
           ? path
           : $filepath.join(route.assetPrefix, path)
@@ -260,12 +302,20 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
               route.assetPrefix,
               path
             )
-        const assetRoute = resolveRoute(globalApi.url(fullAssetPath), routes)
+        const assetMatch = matchRoute(
+          index,
+          globalApi.url(fullAssetPath).pathname
+        )
         // dbg({ fullAssetPath, shortAssetPath, assetRoute })
-        if (!assetRoute) {
-          return `${shortAssetPath}`
+        const assetPath = assetMatch
+          ? applyFingerprint(shortAssetPath, assetMatch.route.fingerprint)
+          : `${shortAssetPath}`
+        // The paths come from the page, which may build them from data
+        if (cache.assets.size >= MAX_REMEMBERED_ASSETS) {
+          cache.assets.clear()
         }
-        return applyFingerprint(shortAssetPath, assetRoute.route.fingerprint)
+        cache.assets.set(assetKey, assetPath)
+        return assetPath
       },
       meta: mkMeta(),
       resolve: mkResolve($filepath.dir(absolutePath)),
@@ -288,7 +338,7 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
       const maybeMiddleware = route.middlewares[idx++] as string
       const middlewareFn: MiddlewareLoaderFunc = require(maybeMiddleware)
 
-      dbg(`Executing middleware ${maybeMiddleware}`)
+      if (isDebug()) dbg(`Executing middleware ${maybeMiddleware}`)
       if (middlewareFn.length < 2) {
         _next(middlewareFn({ ...api, data }))
       } else {
@@ -304,7 +354,7 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
           const loaderFname =
             route.loaders[method as keyof typeof route.loaders]
           if (!loaderFname) return
-          dbg(`Executing loader ${loaderFname}`)
+          if (isDebug()) dbg(`Executing loader ${loaderFname}`)
           data = merge(data, require(loaderFname)({ ...api, data }))
         })
       }
@@ -326,19 +376,22 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
 
       // If the content type is not text/html, we don't need to parse it or render it in a layout
       const contentType = response.header('Content-Type')
-      dbg(`Content-Type: ${contentType}`)
+      if (isDebug()) dbg(`Content-Type: ${contentType}`)
       if (contentType && contentType !== 'text/html') {
-        dbg(`Skipping layout for non-HTML content`, content)
+        if (isDebug()) dbg(`Skipping layout for non-HTML content`, content)
         return true
       }
 
-      try {
-        dbg(`Attempting to parse as JSON`)
-        const parsed = JSON.parse(content)
-        response.json(200, parsed)
-        return true
-      } catch (e) {
-        dbg(`Not JSON`)
+      // Only content that looks like JSON is worth parsing (and failing to parse)
+      if (typeof content !== 'string' || couldBeJson(content)) {
+        try {
+          if (isDebug()) dbg(`Attempting to parse as JSON`)
+          const parsed = JSON.parse(content)
+          response.json(200, parsed)
+          return true
+        } catch (e) {
+          if (isDebug()) dbg(`Not JSON`)
+        }
       }
 
       /**

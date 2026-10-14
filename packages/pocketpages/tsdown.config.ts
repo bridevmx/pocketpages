@@ -5,6 +5,7 @@ export default defineConfig({
     index: 'src/index.ts',
   },
   format: ['cjs'],
+  target: 'es2020',
   dts: true,
   clean: true,
   outDir: 'dist',
