@@ -123,7 +123,11 @@ const paginationPluginFactory: PluginFactory<PaginationOptions> = (
         // Links keep the URL the visitor asked for, not the one a plugin may have
         // rewritten it to
         const target = request.event.request!.url!
-        const path = target.path
+        // The encoded path, as it was asked for: the decoded one turns `/%2Fevil.example`
+        // into `//evil.example`, which links would take the visitor to. Never more than
+        // one slash at the start, whatever the path.
+        const path =
+          '/' + (target.escapedPath?.() ?? target.path).replace(/^[/\\]+/, '')
         const query = target.rawQuery
         const url = (page: number) =>
           pageUrl(path, query, o.pageParam, page, o.omitFirstPage)

@@ -450,8 +450,12 @@ const seoPluginFactory: PluginFactory<SeoOptions> = (config, extra) => {
             const links = api.i18n.hreflang() as string
             if (links) extraTags.push(links)
           }
-          // The address the visitor used, without the query string
-          const path = request.event.request!.url!.path
+          // The address the visitor used, without the query string, as it was asked for
+          // (encoded: `/%2Fevil.example` must not become `//evil.example`, an address
+          // elsewhere) and starting with a single slash
+          const target = request.event.request!.url!
+          const path =
+            '/' + (target.escapedPath?.() ?? target.path).replace(/^[/\\]+/, '')
           return buildHead(data(), settings(), path, jsonLd, extraTags)
         },
       }

@@ -14,7 +14,18 @@ const api = (
   const plugin = make(options)
   const api: any = {
     params,
-    request: { event: { request: { url: { path, rawQuery: query } } } },
+    request: {
+      event: {
+        request: {
+          url: {
+            // Go: the path is decoded, the escaped path is the one that was asked for
+            path: decodeURIComponent(path),
+            escapedPath: () => path,
+            rawQuery: query,
+          },
+        },
+      },
+    },
   }
   plugin.onExtendContextApi!({ api, route: {} as any })
   return api
@@ -92,4 +103,23 @@ test('the nav is made from the same links', () => {
   expect(html).toContain('href="/blog" rel="prev">Back</a>')
   expect(html).toContain('href="/blog?page=3" rel="next"')
   expect(a.paginate({ total: 5 }).nav()).toBe('')
+})
+
+test('links never lead somewhere else, whatever the address looks like', () => {
+  // `/%2Fevil.example/blog` is the path `//evil.example/blog` once decoded, which is an
+  // address elsewhere for a browser
+  const a = api('/%2Fevil.example/blog', 'page=2', { page: 2 })
+  const p = a.paginate({ total: 100, perPage: 10 })
+  expect(p.url(3)).toBe('/%2Fevil.example/blog?page=3')
+  expect(p.nextUrl).toBe('/%2Fevil.example/blog?page=3')
+  expect(p.nav()).not.toContain('href="//')
+  const backslash = api('/%5Cevil.example/blog', '', {})
+  const links = backslash.paginate({ total: 100, perPage: 10 }).url(2)
+  expect(links).toBe('/%5Cevil.example/blog?page=2')
+  expect(links.includes('\\')).toBe(false)
+  // Even a path that really starts with two slashes
+  const slashes = api('//evil.example/blog', '', {})
+  expect(slashes.paginate({ total: 100, perPage: 10 }).url(2)).toBe(
+    '/evil.example/blog?page=2'
+  )
 })
