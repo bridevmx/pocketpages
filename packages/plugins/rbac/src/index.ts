@@ -4,20 +4,38 @@ import type {
   PluginOptionsBase,
 } from 'pocketpages'
 import {
+  Backend,
+  checkMembershipsOptions,
+  createMemberships,
+  jsvmBackend,
+  Membership,
+  MembershipsOptions,
+  rolesSatisfy,
+  Who,
+} from './memberships'
+import {
   AccessRule,
   compileRules,
   decideAll,
   Decision,
   guardDecision,
   GuardRule,
+  Members,
   misplacedPlugins,
   safeNext,
   Subject,
   subjectOfAuth,
 } from './rules'
 
+export type { Membership, MembershipsOptions } from './memberships'
 export { safeNext } from './rules'
-export type { AccessRule, Decision, GuardRule, Subject } from './rules'
+export type {
+  AccessRule,
+  Decision,
+  GuardRule,
+  MemberRule,
+  Subject,
+} from './rules'
 
 /**
  * For the routes you register with PocketBase's `routerAdd()`, which PocketPages does not
@@ -78,6 +96,11 @@ export type RbacOptions = PluginOptionsBase & {
   forbiddenPath: string
   /** Where signed in visitors who have not confirmed their email address are sent, instead of getting a 403 */
   unverifiedPath: string
+  /**
+   * Roles in groups (organizations, teams, projects), kept in a collection of
+   * memberships. Rules then say `member: { scope: 'org' }`.
+   */
+  memberships: MembershipsOptions
 }
 
 const VALID_KEYS = [
@@ -89,6 +112,7 @@ const VALID_KEYS = [
   'loginMessage',
   'forbiddenPath',
   'unverifiedPath',
+  'memberships',
 ]
 
 /** What pages get as `rbac` */
@@ -108,6 +132,24 @@ export type Rbac = {
   requireRole: (...roles: string[]) => void
   /** `/login?next=...` for the page the visitor is on */
   loginUrl: (next?: string) => string
+  /**
+   * The groups the request came in through: `{ org: '4gh3k...' }` for `/orgs/4gh3k.../billing`
+   * under a rule with `member: { scope: 'org' }`. Use these in your queries rather than
+   * `params`: this is the id that was checked.
+   */
+  scope: Record<string, string>
+  /** The roles of the signed in user in a group (the one of the request by default), or `null` if not in it */
+  member: (scope: string, id?: string) => { id: string; roles: string[] } | null
+  /**
+   * Throws a 401 for visitors, a 404 for people who are not in the group (the one of the
+   * request by default), and a 403 for those whose role is too low
+   */
+  requireMember: (
+    scope: string,
+    options?: { id?: string; atLeast?: string; roles?: string[] }
+  ) => void
+  /** Every group the signed in user is in, with the roles in each */
+  memberships: () => Membership[]
 }
 
 const prefersJson = (accept: string) => {
@@ -117,6 +159,15 @@ const prefersJson = (accept: string) => {
       lower.indexOf('+json') !== -1) &&
     lower.indexOf('text/html') === -1
   )
+}
+
+/**
+ * Lets tests give the plugin a database of their own. Not for use in apps.
+ * @internal
+ */
+let backend: Backend | undefined
+export const useBackend = (replacement: Backend | undefined) => {
+  backend = replacement
 }
 
 const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
@@ -138,7 +189,21 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
     unverifiedPath: '',
     ...extra,
   }
-  const rules = compileRules(options.rules, globalApi.pathMatcher)
+  const memberships = extra.memberships
+    ? createMemberships(
+        checkMembershipsOptions(extra.memberships),
+        backend ?? jsvmBackend(),
+        (message) => dbg(message)
+      )
+    : undefined
+  const rules = compileRules(
+    options.rules,
+    globalApi.pathMatcher,
+    memberships && {
+      scopes: memberships.scopes,
+      hierarchy: memberships.hierarchy,
+    }
+  )
 
   // Rules are checked against the request as it is when they run. A plugin listed
   // after this one that rewrites the address or the method would get past them.
@@ -153,6 +218,44 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
 
   const subjectOf = (request: PagesRequest): Subject =>
     subjectOfAuth(request.auth as never, options.roleField)
+
+  /**
+   * What deciding needs of the memberships, for one request. What the database says is
+   * asked once per group and request, and never kept for the next one.
+   */
+  const membersOf = (
+    request: PagesRequest,
+    remember: boolean
+  ): Members | undefined => {
+    if (!memberships) return undefined
+    const asked = () => {
+      const state = request.state.rbac ?? (request.state.rbac = {})
+      return (state.asked ?? (state.asked = {})) as Record<string, string[]>
+    }
+    return {
+      isId: memberships.isId,
+      hierarchy: memberships.hierarchy,
+      superuser: memberships.superuser,
+      rolesIn: (scope, id) => {
+        const cache = asked()
+        const key = `${scope}\u0000${id}`
+        return (
+          cache[key] ??
+          (cache[key] = memberships.rolesIn(
+            request.auth as unknown as Who | undefined,
+            scope,
+            id
+          ))
+        )
+      },
+      entered: remember
+        ? (scope, id) => {
+            const state = request.state.rbac ?? (request.state.rbac = {})
+            ;(state.scope ?? (state.scope = {}))[scope] = id
+          }
+        : undefined,
+    }
+  }
 
   /** Where the visitor is, as they asked for it */
   const hereOf = (request: PagesRequest) => {
@@ -182,7 +285,7 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
     request: PagesRequest,
     decision: Exclude<Decision, 'allow'>
   ): never => {
-    request.state.rbac = { decision }
+    request.state.rbac = { ...request.state.rbac, decision }
     switch (decision) {
       case 'unauthenticated':
         throw new UnauthorizedError('Sign in required')
@@ -208,7 +311,8 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
       subjectOf(request),
       request.method,
       request.pathname,
-      request.canonicalPath ?? request.pathname
+      request.canonicalPath ?? request.pathname,
+      membersOf(request, true)
     )
     if (decision === 'allow') {
       request.state.rbac = { ...request.state.rbac, checked: key }
@@ -260,6 +364,15 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
       if (rules.length > 0) check(request)
       let subject: Subject | undefined
       const who = () => subject ?? (subject = subjectOf(request))
+      const needMembers = (): Members => {
+        const members = membersOf(request, false)
+        if (!members) {
+          throw new Error(
+            'pocketpages-plugin-rbac: there is no memberships option, so there are no groups to ask about'
+          )
+        }
+        return members
+      }
 
       const rbac: Rbac = {
         roles: () => who().roles.slice(),
@@ -270,7 +383,8 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
             who(),
             method.toUpperCase(),
             path,
-            globalApi.canonicalPath(path)
+            globalApi.canonicalPath(path),
+            membersOf(request, false)
           ) === 'allow',
         requireAuth: () => {
           if (!who().signedIn) refuse(request, 'unauthenticated')
@@ -280,6 +394,41 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
           if (!rbac.hasRole(...roles)) refuse(request, 'forbidden')
         },
         loginUrl: (next) => loginUrlFor(request, next),
+        get scope() {
+          return { ...(request.state.rbac?.scope ?? {}) }
+        },
+        member: (scope, id) => {
+          const members = needMembers()
+          const target = id ?? request.state.rbac?.scope?.[scope]
+          if (!who().signedIn || target === undefined) return null
+          if (!members.isId(target)) return null
+          const roles = members.rolesIn(scope, target)
+          return roles.length > 0 ? { id: target, roles: roles.slice() } : null
+        },
+        requireMember: (scope, opts = {}) => {
+          const members = needMembers()
+          if (!who().signedIn) refuse(request, 'unauthenticated')
+          const id = opts.id ?? request.state.rbac?.scope?.[scope]
+          if (id === undefined || !members.isId(id)) refuse(request, 'hidden')
+          if (members.superuser && who().roles.indexOf('superuser') !== -1) {
+            return
+          }
+          const roles = members.rolesIn(scope, id!)
+          if (roles.length === 0) refuse(request, 'hidden')
+          if (!rolesSatisfy(roles, opts, members.hierarchy)) {
+            refuse(request, 'forbidden')
+          }
+        },
+        memberships: () => {
+          needMembers()
+          const state = request.state.rbac ?? (request.state.rbac = {})
+          return (
+            state.list ??
+            (state.list = memberships!.list(
+              request.auth as unknown as Who | undefined
+            ))
+          ).map((m: Membership) => ({ ...m, roles: m.roles.slice() }))
+        },
       }
       api.rbac = rbac
     },

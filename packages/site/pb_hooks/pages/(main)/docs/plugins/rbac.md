@@ -143,6 +143,74 @@ module.exports = ({ rbac, params, auth }) => {
 
 `can()` only knows about the rules. A rule on a path decides who may open it, not which records they can read, and a check in the page for whatever is yours to protect (the posts of other users, say) stays your job. The best place for those rules is PocketBase's API rules, or the filters of your queries.
 
+## Memberships
+
+Roles that depend on the group: _ana_ is an owner of Acme and a viewer of Bolt. The memberships are rows of a collection of your own (`user`, `org`, `role`), and the plugin only reads them.
+
+```javascript
+// pb_hooks/pages/+config.js
+module.exports = {
+  plugins: [
+    'pocketpages-plugin-auth',
+    {
+      rbac: {
+        memberships: {
+          collection: 'memberships',
+          user: 'user', // relation to your users, one value
+          scopes: { org: 'org' }, // kind of group -> field that points to it
+          role: 'role', // a select field (one or several values), or text
+          roles: ['viewer', 'editor', 'admin', 'owner'], // lowest to highest, for atLeast
+          status: { field: 'status', active: ['active'] }, // optional: only these rows count
+          expires: 'expires', // optional: a date, rows that passed don't count
+        },
+        rules: [
+          {
+            path: '/orgs/[org]/billing/**',
+            member: { scope: 'org', atLeast: 'owner' },
+          },
+          { path: '/orgs/[org]/**', member: { scope: 'org' } },
+        ],
+      },
+    },
+  ],
+}
+```
+
+`[org]` is the id of the group in the address. Visitors are sent to sign in, signed in users who are not members get a 404 (`hide: false` for a 403), and members whose role is too low get a 403. `member` can't be combined with `roles`, `auth` or `public`, and `verified` works as in any rule. Rules are checked against the canonical path, so `/orgs/x/index` and `/orgs/x/billing/anything` are covered.
+
+In pages and loaders:
+
+|                                                        |                                                                                   |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| `rbac.member(scope, id?)`                              | The roles of the user in that group, `[]` if none (`id` is the one the rules saw) |
+| `rbac.requireMember(scope, { id?, atLeast?, roles? })` | Throws a 401, a 404 for non-members or a 403 for a role too low                   |
+| `rbac.scope`                                           | The groups the rules let the user into: `{ org: 'abc...' }`                       |
+| `rbac.memberships()`                                   | All the groups of the user: `[{ scope, id, roles }]`, for a group switcher        |
+
+Use `rbac.scope.org` to filter your queries: the rule decides who opens the page, the filter decides which records it shows.
+
+**Security.**
+
+- Ids that don't look like an id (`idPattern`, the 15 characters of PocketBase unless told otherwise) never reach the database, and every value goes to the query as a parameter. Names of collections and fields from the config are checked and quoted. Anything unexpected (a missing collection, a field of the wrong type) fails closed.
+- Nothing is kept from one request to the next, so removing a membership is felt by the next request. Inside a request the answer is remembered per group. A lookup costs one indexed query, about 0.07 ms in our measurements with 100,000 rows.
+- Superusers come into every group only with `superuser: true`.
+- Give the collection a unique index on (`user`, group field), so a user can't have two rows for one group (the plugin warns if it is missing). The roles of a user are the union of their rows.
+- The user relation has to point to the collection of the signed in users.
+- Hierarchies (a role in the organization counting in its projects) are not inherited: give each level its own scope and rule.
+- `guard()` knows nothing about memberships.
+
+**API rules.** The plugin reads with `$app`, which ignores API rules, so the rules of the collection are only for the API. Start closed and open what you need: users read their own rows, nobody writes from the client.
+
+```
+listRule:   @request.auth.id != "" && user = @request.auth.id
+viewRule:   @request.auth.id != "" && user = @request.auth.id
+createRule: null
+updateRule: null
+deleteRule: null
+```
+
+Letting the owners of a group manage its members through the API is possible with rules on `@collection.memberships`, but make sure `user`, the group and `role` can't be set by someone who is not an owner of that group (otherwise anybody can make themselves one).
+
 ## What PocketBase already does
 
 PocketBase does not know about the files in your `pages` folder: they are served by PocketPages, and that is what the rules above are for. For everything else it has its own tools, and you should use them:

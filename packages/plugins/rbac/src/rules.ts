@@ -1,3 +1,5 @@
+import { rolesSatisfy } from './memberships'
+
 export type AccessRule = {
   /** Where the rule applies: `/admin/**`, `/account`, `['/a', '/b/*']`... */
   path: string | string[]
@@ -13,6 +15,22 @@ export type AccessRule = {
   verified?: boolean
   /** Answer visitors that are not allowed with a 404, to not tell the page exists */
   hide?: boolean
+  /**
+   * Visitors have to belong to a group (an organization, a team...) that the address says
+   * which one: `path: '/orgs/[org]/**', member: { scope: 'org' }`. See the memberships option.
+   */
+  member?: MemberRule
+}
+
+export type MemberRule = {
+  /** The kind of group, one of the keys of `memberships.scopes` */
+  scope: string
+  /** The `[name]` in `path` that holds the id of the group. The scope unless told otherwise. */
+  param?: string
+  /** The lowest role that comes in, per the order of `memberships.roles` */
+  atLeast?: string
+  /** Or any of these roles */
+  roles?: string[]
 }
 
 /**
@@ -43,11 +61,76 @@ export type CompiledRule = {
   needsSignIn: boolean
   verified: boolean
   hide: boolean
+  member: CompiledMember | undefined
+}
+
+type CompiledMember = {
+  scope: string
+  atLeast: string | undefined
+  roles: string[] | undefined
+  /** Where the id of the group is in the path: the position of the segment */
+  idAt: (pathname: string) => number
+}
+
+/** What compiling rules needs to know about the memberships of the config */
+export type MembershipSetup = {
+  scopes: string[]
+  /** The roles from the lowest, when the config says so */
+  hierarchy: string[] | undefined
+}
+
+const PLACEHOLDER = /^\[([A-Za-z_][A-Za-z0-9_]*)\]$/
+
+/**
+ * `/orgs/[org]/**` -> the pattern for `pathMatcher` (`/orgs/*` + `/**`) and where the
+ * `[org]` is. The segments before it each take exactly one segment of the path, or it
+ * would not be known where the id is.
+ */
+const memberPattern = (
+  pattern: string,
+  param: string
+): { pattern: string; at: number } => {
+  const segments = pattern.split('/')
+  if (!segments.some((segment) => PLACEHOLDER.test(segment))) {
+    throw new Error(
+      `pocketpages-plugin-rbac: the path '${pattern}' needs [${param}], where the id of the group is`
+    )
+  }
+  let at = -1
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i]!
+    const placeholder = PLACEHOLDER.exec(segment)
+    if (placeholder) {
+      if (placeholder[1] !== param) {
+        throw new Error(
+          `pocketpages-plugin-rbac: the path '${pattern}' has [${placeholder[1]}], and the rule says [${param}]`
+        )
+      }
+      if (at !== -1) {
+        throw new Error(
+          `pocketpages-plugin-rbac: [${param}] is twice in the path '${pattern}'`
+        )
+      }
+      at = i
+      segments[i] = '*'
+    } else if (at === -1 && segment === '**') {
+      throw new Error(
+        `pocketpages-plugin-rbac: in '${pattern}', [${param}] has to come before any **`
+      )
+    }
+  }
+  if (at === -1) {
+    throw new Error(
+      `pocketpages-plugin-rbac: the path '${pattern}' needs [${param}], where the id of the group is`
+    )
+  }
+  return { pattern: segments.join('/'), at }
 }
 
 export const compileRules = (
   rules: AccessRule[],
-  pathMatcher: (patterns: string | string[]) => (pathname: string) => boolean
+  pathMatcher: (patterns: string | string[]) => (pathname: string) => boolean,
+  setup?: MembershipSetup
 ): CompiledRule[] =>
   rules.map((rule, index) => {
     if (!rule.path || (Array.isArray(rule.path) && rule.path.length === 0)) {
@@ -60,14 +143,22 @@ export const compileRules = (
     }
     const roles = rule.roles && rule.roles.length > 0 ? rule.roles : undefined
     const isPublic = rule.public === true
-    if (isPublic && (rule.auth || roles || rule.verified)) {
+    if (isPublic && (rule.auth || roles || rule.verified || rule.member)) {
       throw new Error(
         `pocketpages-plugin-rbac: rule ${index} is public, it cannot ask for more`
       )
     }
+    if (rule.member) {
+      if (roles || rule.auth) {
+        throw new Error(
+          `pocketpages-plugin-rbac: rule ${index} is about a group: use member.roles or member.atLeast, not roles or auth`
+        )
+      }
+      return compileMemberRule(rule, index, pathMatcher, setup)
+    }
     if (!isPublic && !rule.auth && !roles && !rule.verified) {
       throw new Error(
-        `pocketpages-plugin-rbac: rule ${index} says nothing: add auth, roles, verified or public`
+        `pocketpages-plugin-rbac: rule ${index} says nothing: add auth, roles, verified, member or public`
       )
     }
     return {
@@ -80,8 +171,95 @@ export const compileRules = (
       needsSignIn: !isPublic,
       verified: rule.verified === true,
       hide: rule.hide === true,
+      member: undefined,
     }
   })
+
+const compileMemberRule = (
+  rule: AccessRule,
+  index: number,
+  pathMatcher: (patterns: string | string[]) => (pathname: string) => boolean,
+  setup: MembershipSetup | undefined
+): CompiledRule => {
+  const member = rule.member!
+  const where = `rule ${index}`
+  if (!setup) {
+    throw new Error(
+      `pocketpages-plugin-rbac: ${where} is about a group, and there is no memberships option`
+    )
+  }
+  if (!member.scope || setup.scopes.indexOf(member.scope) === -1) {
+    throw new Error(
+      `pocketpages-plugin-rbac: ${where}: unknown scope '${member.scope}', the memberships option has ${setup.scopes.join(', ')}`
+    )
+  }
+  if (member.atLeast !== undefined) {
+    if (!setup.hierarchy || setup.hierarchy.indexOf(member.atLeast) === -1) {
+      throw new Error(
+        `pocketpages-plugin-rbac: ${where}: atLeast '${member.atLeast}' is not one of memberships.roles`
+      )
+    }
+  }
+  if (member.roles !== undefined) {
+    if (!Array.isArray(member.roles)) {
+      throw new Error(
+        `pocketpages-plugin-rbac: ${where}: member.roles must be a list`
+      )
+    }
+    if (setup.hierarchy) {
+      for (const role of member.roles) {
+        if (setup.hierarchy.indexOf(role) === -1) {
+          throw new Error(
+            `pocketpages-plugin-rbac: ${where}: role '${role}' is not one of memberships.roles`
+          )
+        }
+      }
+    }
+  }
+  const param = member.param ?? member.scope
+  const patterns = (Array.isArray(rule.path) ? rule.path : [rule.path]).map(
+    (p) => memberPattern(p, param)
+  )
+  const matchers = patterns.map((p) => ({
+    match: pathMatcher(p.pattern),
+    at: p.at,
+  }))
+  return {
+    match: (pathname) => matchers.some((m) => m.match(pathname)),
+    methods: rule.methods
+      ? new Set(rule.methods.map((method) => method.toUpperCase()))
+      : undefined,
+    isPublic: false,
+    roles: undefined,
+    needsSignIn: true,
+    verified: rule.verified === true,
+    // Whoever is not in the group is not told it exists, unless the rule says otherwise
+    hide: rule.hide !== false,
+    member: {
+      scope: member.scope,
+      atLeast: member.atLeast,
+      roles: member.roles && member.roles.length > 0 ? member.roles : undefined,
+      idAt: (pathname) => {
+        for (const m of matchers) if (m.match(pathname)) return m.at
+        return -1
+      },
+    },
+  }
+}
+
+/** What deciding needs to know about memberships */
+export type Members = {
+  /** Can this text be the id of a group */
+  isId: (value: unknown) => boolean
+  /** The roles of the signed in user in a group: `[]` if none. May ask the database. */
+  rolesIn: (scope: string, id: string) => string[]
+  /** The roles from the lowest, when the config says so */
+  hierarchy: string[] | undefined
+  /** Superusers come into every group */
+  superuser: boolean
+  /** Called with the group of every rule that let the request in */
+  entered?: (scope: string, id: string) => void
+}
 
 /**
  * Whether `subject` may make a request with `method` to `pathname`. The first rule that
@@ -91,13 +269,15 @@ export const decide = (
   rules: CompiledRule[],
   subject: Subject,
   method: string,
-  pathname: string
+  pathname: string,
+  members?: Members
 ): Decision => {
   for (let i = 0; i < rules.length; i++) {
     const rule = rules[i]!
     if (rule.methods && !rule.methods.has(method)) continue
     if (!rule.match(pathname)) continue
     if (rule.isPublic) return 'allow'
+    if (rule.member) return decideMember(rule, subject, pathname, members)
     if (!subject.signedIn) return rule.hide ? 'hidden' : 'unauthenticated'
     if (
       rule.roles &&
@@ -108,6 +288,38 @@ export const decide = (
     if (rule.verified && !subject.verified) return 'unverified'
     return 'allow'
   }
+  return 'allow'
+}
+
+/**
+ * A rule about a group. Visitors are sent to sign in. People who are signed in and are not
+ * in the group are refused as if there were no such group (unless `hide: false`); people
+ * who are in it with too low a role are refused openly, since they know it is there.
+ * Everything that can't be an id, or that is not asked about, is a refusal.
+ */
+const decideMember = (
+  rule: CompiledRule,
+  subject: Subject,
+  pathname: string,
+  members: Members | undefined
+): Decision => {
+  const member = rule.member!
+  if (!subject.signedIn) return 'unauthenticated'
+  if (!members) return rule.hide ? 'hidden' : 'forbidden'
+  const notInGroup: Decision = rule.hide ? 'hidden' : 'forbidden'
+
+  const id = pathname.split('/')[member.idAt(pathname)]
+  if (id === undefined || !members.isId(id)) return notInGroup
+
+  if (members.superuser && subject.roles.indexOf('superuser') !== -1) {
+    // Not a member, and allowed in
+  } else {
+    const roles = members.rolesIn(member.scope, id)
+    if (roles.length === 0) return notInGroup
+    if (!rolesSatisfy(roles, member, members.hierarchy)) return 'forbidden'
+  }
+  if (rule.verified && !subject.verified) return 'unverified'
+  members.entered?.(member.scope, id)
   return 'allow'
 }
 
@@ -266,9 +478,10 @@ export const decideAll = (
   subject: Subject,
   method: string,
   pathname: string,
-  canonicalPath: string
+  canonicalPath: string,
+  members?: Members
 ): Decision => {
-  const literal = decide(rules, subject, method, pathname)
+  const literal = decide(rules, subject, method, pathname, members)
   if (literal !== 'allow' || canonicalPath === pathname) return literal
-  return decide(rules, subject, method, canonicalPath)
+  return decide(rules, subject, method, canonicalPath, members)
 }

@@ -24,7 +24,7 @@ g.NotFoundError = class extends FakeError {
   }
 }
 
-const { default: factory, guard } = await import('./index')
+const { default: factory, guard, useBackend } = await import('./index')
 
 /** What the router makes of the URLs of the pages of these tests */
 const canonicalOf = (path: string) =>
@@ -81,7 +81,7 @@ const exchange = (
     auth: who && {
       id: who.id,
       get: (field: string) => who.fields?.[field],
-      collection: () => ({ name: who.collection ?? 'users' }),
+      collection: () => ({ name: who.collection ?? 'users', id: 'pbc_users' }),
     },
     event: {
       request: {
@@ -563,7 +563,7 @@ const eventFor = (who: Who) =>
     auth: who && {
       id: who.id,
       get: (field: string) => who.fields?.[field],
-      collection: () => ({ name: who.collection ?? 'users' }),
+      collection: () => ({ name: who.collection ?? 'users', id: 'pbc_users' }),
     },
   }) as any
 
@@ -619,4 +619,334 @@ test('superusers of PocketBase pass as superusers, and the field of the role can
 
 test('a rule that asks for nothing is an error, not an open door', () => {
   expect(() => guard(eventFor(admin), {})).toThrow('says nothing')
+})
+
+// --- groups
+
+const ORG_A = 'orgaaaaaaaaaaaa'
+const ORG_B = 'orgbbbbbbbbbbbb'
+const memberOptions = {
+  collection: 'memberships',
+  user: 'user',
+  scopes: { org: 'org' },
+  role: 'role',
+  roles: ['viewer', 'editor', 'admin', 'owner'],
+}
+const groupRules = [
+  {
+    path: '/orgs/[org]/billing/**',
+    member: { scope: 'org', atLeast: 'owner' },
+  },
+  { path: '/orgs/[org]/**', member: { scope: 'org' } },
+]
+
+/** Who is in what: `user|group` -> roles (change `rows` to change it). Counts the questions asked. */
+const database = (rows: Record<string, string[]>) => {
+  const asked: Array<{ sql: string; params: Record<string, string> }> = []
+  useBackend({
+    schema: () => ({
+      table: 'memberships',
+      fields: {
+        user: { type: 'relation', multiple: false, collectionId: 'pbc_users' },
+        org: { type: 'relation', multiple: false, collectionId: 'pbc_orgs' },
+        role: { type: 'select', multiple: false, collectionId: '' },
+      },
+      indexes: ['CREATE UNIQUE INDEX `i` ON `memberships` (`user`, `org`)'],
+    }),
+    all: (sql, params, columns) => {
+      asked.push({ sql, params })
+      if (columns.length === 1) {
+        return (rows[`${params.u}|${params.s}`] ?? []).map((r) => ({ r }))
+      }
+      return Object.keys(rows)
+        .filter((k) => k.startsWith(`${params.u}|`))
+        .flatMap((k) => rows[k]!.map((r) => ({ r, s0: k.split('|')[1] })))
+    },
+  })
+  return asked
+}
+
+const withGroups = (
+  extra: Record<string, unknown> = {},
+  options = memberOptions
+) => make({ rules: groupRules, memberships: options, ...extra })
+
+const ana: Who = { id: 'ana', fields: { role: 'member', verified: true } }
+const bob: Who = { id: 'bob', fields: { role: 'member', verified: true } }
+
+const rolesOf = {
+  'ana|orgaaaaaaaaaaaa': ['viewer'],
+  'bob|orgaaaaaaaaaaaa': ['owner'],
+  'bob|orgbbbbbbbbbbbb': ['editor'],
+}
+
+test('visitors are sent to sign in, and people who are not in the group are told it is not there', () => {
+  database(rolesOf)
+  const plugin = withGroups()
+  expect(
+    attempt(plugin, exchange({ path: `/orgs/${ORG_A}/settings` }))
+  ).toMatchObject({ status: 401 })
+  expect(
+    attempt(plugin, exchange({ path: `/orgs/${ORG_B}/settings`, who: ana }))
+  ).toMatchObject({ status: 404 })
+  expect(
+    attempt(plugin, exchange({ path: `/orgs/${ORG_A}/settings`, who: ana }))
+  ).toBeUndefined()
+})
+
+test('roles in a group are asked for by name or by how high they are', () => {
+  database(rolesOf)
+  const plugin = withGroups()
+  const billing = `/orgs/${ORG_A}/billing`
+  expect(attempt(plugin, exchange({ path: billing, who: ana }))).toMatchObject({
+    status: 403,
+  })
+  expect(attempt(plugin, exchange({ path: billing, who: bob }))).toBeUndefined()
+  const named = withGroups({
+    rules: [
+      {
+        path: '/orgs/[org]/**',
+        member: { scope: 'org', roles: ['editor', 'admin'] },
+      },
+    ],
+  })
+  expect(
+    attempt(named, exchange({ path: `/orgs/${ORG_B}/x`, who: bob }))
+  ).toBeUndefined()
+  expect(
+    attempt(named, exchange({ path: `/orgs/${ORG_A}/x`, who: ana }))
+  ).toMatchObject({ status: 403 })
+})
+
+test('every address of a page is the same group', () => {
+  database(rolesOf)
+  const plugin = withGroups()
+  for (const path of [
+    `/orgs/${ORG_A}/billing`,
+    `/orgs/${ORG_A}/billing/index`,
+    `/orgs/${ORG_A}/billing/index/x`,
+  ]) {
+    expect(attempt(plugin, exchange({ path, who: ana }))).toMatchObject({
+      status: 403,
+    })
+    expect(attempt(plugin, exchange({ path }))).toMatchObject({ status: 401 })
+  }
+})
+
+test('what is not the id of a group never reaches the database', () => {
+  const asked = database(rolesOf)
+  const plugin = withGroups()
+  for (const id of [
+    "x'%20OR%20'1'='1",
+    'ORGAAAAAAAAAAAA',
+    'short',
+    'a'.repeat(200),
+    '..',
+    '%2e%2e',
+  ]) {
+    expect(
+      attempt(plugin, exchange({ path: `/orgs/${id}/x`, who: bob }))
+    ).toMatchObject({ status: 404 })
+  }
+  expect(asked).toHaveLength(0)
+})
+
+test('the database is asked once for a group during a request, and never kept for the next', () => {
+  const rows = { ...rolesOf }
+  const asked = database(rows)
+  const plugin = withGroups()
+  const x = exchange({ path: `/orgs/${ORG_A}/billing/index`, who: bob })
+  x.request.canonicalPath = `/orgs/${ORG_A}/billing`
+  expect(attempt(plugin, x)).toBeUndefined()
+  // When pages get their API, and from the helpers
+  const api: any = { request: x.request }
+  plugin.onExtendContextApi({ api, route: x.route })
+  api.rbac.member('org')
+  api.rbac.can(`/orgs/${ORG_A}/billing`)
+  api.rbac.requireMember('org', { atLeast: 'admin' })
+  expect(asked).toHaveLength(1)
+  // The next request asks again: taking somebody out is felt by their very next request
+  delete (rows as Record<string, string[]>)[`bob|${ORG_A}`]
+  expect(
+    attempt(plugin, exchange({ path: `/orgs/${ORG_A}/x`, who: bob }))
+  ).toMatchObject({ status: 404 })
+  expect(asked).toHaveLength(2)
+})
+
+test('who is not in the group can be told so, or not', () => {
+  database(rolesOf)
+  const open = withGroups({
+    rules: [{ path: '/orgs/[org]/**', member: { scope: 'org' }, hide: false }],
+  })
+  expect(
+    attempt(open, exchange({ path: `/orgs/${ORG_B}/x`, who: ana }))
+  ).toMatchObject({ status: 403 })
+})
+
+test('superusers come into groups only if the config says so', () => {
+  database(rolesOf)
+  const superuser: Who = { id: 'root', collection: '_superusers' }
+  const path = `/orgs/${ORG_A}/billing`
+  expect(
+    attempt(withGroups(), exchange({ path, who: superuser }))
+  ).toMatchObject({ status: 404 })
+  const allowed = withGroups({}, { ...memberOptions, superuser: true } as any)
+  const x = exchange({ path, who: superuser })
+  expect(attempt(allowed, x)).toBeUndefined()
+  expect(x.request.state.rbac.scope).toEqual({ org: ORG_A })
+  // and only superusers
+  expect(attempt(allowed, exchange({ path, who: ana }))).toMatchObject({
+    status: 403,
+  })
+})
+
+test('a group can ask for a confirmed email address too', () => {
+  database({ 'dan|orgaaaaaaaaaaaa': ['owner'] })
+  const plugin = withGroups({
+    rules: [
+      { path: '/orgs/[org]/**', member: { scope: 'org' }, verified: true },
+    ],
+  })
+  const dan: Who = { id: 'dan', fields: { verified: false } }
+  expect(
+    attempt(plugin, exchange({ path: `/orgs/${ORG_A}/x`, who: dan }))
+  ).toMatchObject({ status: 403 })
+  expect(request_state_of(plugin, dan)).toBe('unverified')
+})
+
+const request_state_of = (plugin: any, who: Who) => {
+  const x = exchange({ path: `/orgs/${ORG_A}/x`, who })
+  attempt(plugin, x)
+  return x.request.state.rbac.decision
+}
+
+test('rules about a group can be for some methods', () => {
+  database(rolesOf)
+  const plugin = withGroups({
+    rules: [
+      {
+        path: '/orgs/[org]/**',
+        member: { scope: 'org', atLeast: 'admin' },
+        methods: ['DELETE'],
+      },
+    ],
+  })
+  expect(
+    attempt(plugin, exchange({ path: `/orgs/${ORG_A}/x`, who: ana }))
+  ).toBeUndefined()
+  expect(
+    attempt(
+      plugin,
+      exchange({ path: `/orgs/${ORG_A}/x`, who: ana, method: 'DELETE' })
+    )
+  ).toMatchObject({ status: 403 })
+})
+
+test('pages know which group the request came in through, and can ask about others', () => {
+  database(rolesOf)
+  const plugin = withGroups()
+  const x = exchange({ path: `/orgs/${ORG_A}/x`, who: bob })
+  expect(attempt(plugin, x)).toBeUndefined()
+  const rbac = apiFor(plugin, x)
+  expect(rbac.scope).toEqual({ org: ORG_A })
+  expect(rbac.member('org')).toEqual({ id: ORG_A, roles: ['owner'] })
+  expect(rbac.member('org', ORG_B)).toEqual({ id: ORG_B, roles: ['editor'] })
+  expect(rbac.member('org', 'stranger00000000')).toBeNull()
+  expect(rbac.member('org', 'not an id')).toBeNull()
+  expect(() => rbac.requireMember('org')).not.toThrow()
+  expect(() =>
+    rbac.requireMember('org', { id: ORG_B, atLeast: 'editor' })
+  ).not.toThrow()
+  expect(() =>
+    rbac.requireMember('org', { id: ORG_B, atLeast: 'admin' })
+  ).toThrow()
+  expect(rbac.memberships()).toEqual([
+    { scope: 'org', id: ORG_A, roles: ['owner'] },
+    { scope: 'org', id: ORG_B, roles: ['editor'] },
+  ])
+  // The copies can be changed without changing what the request knows
+  rbac.scope.org = ORG_B
+  expect(rbac.scope).toEqual({ org: ORG_A })
+})
+
+test('requiring a group in a loader refuses like the rules do', () => {
+  database(rolesOf)
+  const plugin = withGroups({ rules: [] })
+  const status = (who: Who, opts?: object, scope = 'org') => {
+    const x = exchange({ path: '/anywhere', who })
+    try {
+      apiFor(plugin, x).requireMember(scope, { id: ORG_A, ...opts })
+    } catch (e) {
+      return (e as FakeError).status
+    }
+    return 'ok'
+  }
+  expect(status(undefined as unknown as Who)).toBe(401)
+  expect(status({ id: 'stranger' })).toBe(404)
+  expect(status(ana)).toBe('ok')
+  expect(status(ana, { atLeast: 'admin' })).toBe(403)
+  expect(status(bob, { atLeast: 'admin' })).toBe('ok')
+})
+
+test('the pages of a site without groups can not ask about them', () => {
+  const plugin = make()
+  expect(() => apiFor(plugin, exchange({ who: ana })).member('org')).toThrow(
+    'no memberships option'
+  )
+})
+
+test('rules about groups have to make sense, or the plugin does not start', () => {
+  database({})
+  const bad =
+    (rule: object, options: object | null = memberOptions) =>
+    () =>
+      make({ rules: [rule], memberships: options ?? undefined })
+  expect(
+    bad({ path: '/orgs/[org]/**', member: { scope: 'org' } }, null)
+  ).toThrow('no memberships option')
+  expect(bad({ path: '/orgs/[org]/**', member: { scope: 'team' } })).toThrow(
+    "unknown scope 'team'"
+  )
+  expect(bad({ path: '/orgs/**', member: { scope: 'org' } })).toThrow(
+    'needs [org]'
+  )
+  expect(bad({ path: '/**/[org]', member: { scope: 'org' } })).toThrow(
+    'before any **'
+  )
+  expect(bad({ path: '/orgs/[team]/**', member: { scope: 'org' } })).toThrow(
+    '[team]'
+  )
+  expect(bad({ path: '/[org]/[org]', member: { scope: 'org' } })).toThrow(
+    'twice'
+  )
+  expect(
+    bad({ path: '/orgs/[org]/**', member: { scope: 'org', atLeast: 'boss' } })
+  ).toThrow('not one of memberships.roles')
+  expect(
+    bad({ path: '/orgs/[org]/**', member: { scope: 'org', roles: ['boss'] } })
+  ).toThrow('not one of memberships.roles')
+  expect(
+    bad({ path: '/orgs/[org]/**', member: { scope: 'org' }, roles: ['admin'] })
+  ).toThrow('about a group')
+  expect(
+    bad({ path: '/orgs/[org]/**', member: { scope: 'org' }, public: true })
+  ).toThrow('public')
+  expect(
+    bad(
+      { path: '/orgs/[org]/**', member: { scope: 'org', atLeast: 'admin' } },
+      {
+        ...memberOptions,
+        roles: undefined,
+      }
+    )
+  ).toThrow('not one of memberships.roles')
+  expect(
+    bad(
+      { path: '/x', auth: true },
+      { ...memberOptions, collection: 'bad name' }
+    )
+  ).toThrow('collection')
+  expect(
+    bad({ path: '/o/[id]/**', member: { scope: 'org', param: 'id' } })
+  ).not.toThrow()
 })
