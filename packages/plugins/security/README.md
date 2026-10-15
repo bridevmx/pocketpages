@@ -147,7 +147,7 @@ A request is counted against every rule that matches it. When one of them says n
 
 The windows slide: the requests of the previous window still count in proportion to how much of it is left, so a client cannot make a full allowance at the end of a window and another at the start of the next.
 
-A page answers at more than one address (`/login` is also `/login/index`), and a rule holds for all of them: a request counts for a rule if the address in the URL or the address of the page that serves it matches. The same page is exempt from the CSRF check (`ignore`) only if both do.
+A URL can be written with a trailing slash (`/login/` is `/login`), and a rule holds for both: a request counts for a rule if the address in the URL or the address of the page that serves it matches. The same page is exempt from the CSRF check (`ignore`) only if both do.
 
 Rules also apply to requests PocketBase answers itself, so `{ path: '/api/collections/users/auth-with-password', ... }` protects PocketBase's own login.
 
@@ -166,7 +166,7 @@ PocketBase (0.23 and newer) comes with one, and its [documentation](https://pock
 | Clients                   | counted by IP address. A rule can be only for guests (`@guest`) or only for signed in users (`@auth`).                                                            | by IP address, or by user                                                         |
 | Window                    | fixed                                                                                                                                                             | sliding                                                                           |
 | Other keys                | no                                                                                                                                                                | `rateLimit.hit()` and `enforce()` count anything: attempts per email address, say |
-| Other addresses of a page | the path of the URL only: `/login/index` is not `/login`                                                                                                          | the URL and the page that serves it                                               |
+| Other addresses of a page | the path of the URL only: `/login/` is not `/login`                                                                                                               | the URL and the page that serves it                                               |
 | Never limited             | superusers, and the IPs you exclude                                                                                                                               |                                                                                   |
 
 Both can be on: a request has to be within the limits of each.

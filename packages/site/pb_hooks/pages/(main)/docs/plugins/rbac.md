@@ -61,7 +61,7 @@ rules: [
 - `verified: true`: users whose `verified` field is true.
 - `hide: true`: answer with a 404 instead of a 401 or a 403, so that nobody learns that the page exists.
 
-A page has more than one address. `pages/account/index.ejs` answers at `/account`, `/account/index` and `/account/index/anything`; `pages/dashboard.ejs` at `/dashboard` and everything below it; `pages/posts/[id]/index.ejs` at `/posts/5` and `/posts/5/index`. Rules are checked against the address in the URL **and** against the address of the page that serves it (`request.canonicalPath`: `/account` for all of the above), and the request goes through only if both are allowed. A rule for `/account` therefore holds for `/account/index`, and a rule for `/posts/*` that only covers `DELETE` holds for `DELETE /posts/5/index`.
+A page has one address, but a URL can still be written in more than one way: `/account` and `/account/`, and `/posts/5` and `/posts/5/` (PocketPages ignores a trailing slash). Rules are checked against the address in the URL **and** against the address of the page that serves it (`request.canonicalPath`, `/account` for both of the first pair), and the request goes through only if both are allowed. A rule for `/account` therefore holds for `/account/`, and a rule for `/posts/*` that only covers `DELETE` holds for `DELETE /posts/5/`.
 
 Rules cover the pages and the static files in your `pages` folder (a PDF only members should download, say). They do not cover what PocketBase serves itself, its API and its admin UI: use PocketBase's own API rules for those.
 

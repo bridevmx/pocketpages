@@ -48,7 +48,7 @@ Nothing is kept with `--dev`, where files change under the cache. Set `dev: true
 
 A page is served from the cache, and added to it, when **all** of this is true:
 
-- the request is a `GET` for a page, not a file, and its address, and the address of the page that serves it (`/blog` for `/blog/index`), match `include` and not `exclude`. A `HEAD` request is answered from the cache when the page is there, but never adds one: it does not run what a `GET` runs for the body.
+- the request is a `GET` for a page, not a file, and its address, and the address of the page that serves it (`/blog` for `/blog/`), match `include` and not `exclude`. A `HEAD` request is answered from the cache when the page is there, but never adds one: it does not run what a `GET` runs for the body.
 - the address does not carry a `__flash` message, the one PocketPages adds when it redirects with a message: it is for the visitor who was sent there
 - the request has **no cookies** (except those you list in `ignoreCookies`), no `Authorization` header, and nobody is signed in
 - the page is answered with `200`, as HTML, without having sent anything else (a redirect, `echo()`...)

@@ -116,18 +116,26 @@ export const buildRouteIndex = (routes: Route[]): RouteIndex => {
   return { root }
 }
 
-const splitPath = (path: string) =>
-  (path.indexOf('\\') === -1 ? path : $filepath.toSlash(path))
-    .split('/')
-    .filter((p) => p)
+const splitPath = (path: string) => path.split('/').filter((p) => p)
 
 type Search = {
   parts: string[]
+  /** Whether the routes sought are the `index` pages (the last part is the added `index`) */
+  index: boolean
   best: IndexedRoute | undefined
   fingerprinted: boolean
 }
 
+/** `docs/index.ejs`, which answers for `/docs` and never for `/docs/index` */
+const isIndexPage = (route: Route) => {
+  const last = route.segments[route.segments.length - 1]
+  return (
+    !!last && !route.isStatic && !last.paramName && last.nodeName === 'index'
+  )
+}
+
 const consider = (search: Search, candidate: IndexedRoute, via: boolean) => {
+  if (isIndexPage(candidate.route) !== search.index) return
   if (!search.best || candidate.order < search.best.order) {
     search.best = candidate
     search.fingerprinted = via
@@ -136,19 +144,23 @@ const consider = (search: Search, candidate: IndexedRoute, via: boolean) => {
 
 /**
  * Walks every way `parts` can be matched, keeping the most specific route found. A
- * route matches when its segments match the first segments of the path (the path may
- * continue past them), `[param]` segments match anything, even a path that ran out.
+ * route matches when its segments are the segments of the path, all of them: the path
+ * can't have more, and `[param]` segments need a part to take.
  */
 const visit = (search: Search, node: RouteNode, depth: number) => {
-  if (node.routes) {
-    for (let i = 0; i < node.routes.length; i++) {
-      consider(search, node.routes[i]!, false)
+  const { parts } = search
+  if (depth === parts.length) {
+    if (node.routes) {
+      for (let i = 0; i < node.routes.length; i++) {
+        consider(search, node.routes[i]!, false)
+      }
     }
+    return
   }
-  const part = search.parts[depth]
-  if (part !== undefined) {
-    const child = node.statics?.get(part)
-    if (child) visit(search, child, depth + 1)
+  const part = parts[depth]!
+  const child = node.statics?.get(part)
+  if (child) visit(search, child, depth + 1)
+  if (depth === parts.length - 1) {
     const fingerprinted = node.fingerprinted?.get(part)
     if (fingerprinted) {
       for (let i = 0; i < fingerprinted.length; i++) {
@@ -159,7 +171,11 @@ const visit = (search: Search, node: RouteNode, depth: number) => {
   if (node.param) visit(search, node.param, depth + 1)
 }
 
-const matchParts = (index: RouteIndex, parts: string[]): RouteMatch | null => {
+const matchParts = (
+  index: RouteIndex,
+  parts: string[],
+  indexPage: boolean
+): RouteMatch | null => {
   // Most requests that get here are not for a page. Nothing at the root can match them
   // when there is no [param] first segment and no route has the first segment of the
   // path as its own, so there is nothing to search.
@@ -174,7 +190,12 @@ const matchParts = (index: RouteIndex, parts: string[]): RouteMatch | null => {
     }
   }
 
-  const search: Search = { parts, best: undefined, fingerprinted: false }
+  const search: Search = {
+    parts,
+    index: indexPage,
+    best: undefined,
+    fingerprinted: false,
+  }
   visit(search, root, 0)
   return search.best
     ? {
@@ -187,39 +208,45 @@ const matchParts = (index: RouteIndex, parts: string[]): RouteMatch | null => {
 
 /**
  * Finds the route that handles `pathname` (the path of the request URL, starting with
- * `/`). `docs/guide` is looked up as `docs/guide` first and as `docs/guide/index` next.
+ * `/`). `/docs/guide` is `docs/guide` or else `docs/guide/index`, and nothing else is:
+ * every page has one address, so `/docs/guide/index`, `/docs/guide/more`, an empty
+ * `[param]`, `//`, and `\` are all a 404. A trailing `/` is ignored.
  */
 export const matchRoute = (
   index: RouteIndex,
   pathname: string
 ): RouteMatch | null => {
+  if (pathname.indexOf('\\') !== -1) return null
   const urlPath = pathname.slice(1)
-  const first = urlPath || 'index'
-  const parts = splitPath(first)
-  const match = matchParts(index, parts)
-  if (match || first === 'index') return match
-  // `${urlPath}/index` splits into the same segments plus `index`
-  return matchParts(index, parts.concat('index'))
+  const trimmed = urlPath.endsWith('/') ? urlPath.slice(0, -1) : urlPath
+  if (
+    trimmed.indexOf('//') !== -1 ||
+    trimmed.startsWith('/') ||
+    trimmed.endsWith('/')
+  )
+    return null
+  const parts = splitPath(trimmed)
+  return (
+    matchParts(index, parts, false) ||
+    matchParts(index, parts.concat('index'), true)
+  )
 }
 
 /**
- * The address a route is known by: `/account` for requests to `/account`, `/account/index`
- * and `/account/anything`, with the values of its `[param]` segments in place.
+ * The address a route is known by: `/account` for requests to `/account` and
+ * `/account/`, with the values of its `[param]` segments in place.
  *
- * Several URLs lead to one route: the path may continue past the segments of the route,
- * `index` can be spelled out, and static files also answer to their fingerprinted name.
- * Rules about who may go where have to hold for this address as well as for the URL, or
- * `/account/index` would not be covered by a rule for `/account`.
+ * Every page has one address. Static files are the exception: they also answer to their
+ * fingerprinted name (`app.<sha256>.css`), and this is the plain one. Rules about who
+ * may go where are written for this address.
  */
 export const canonicalPathOf = (match: RouteMatch): string => {
   const { segments } = match.route
-  // A `[param]` that found no part in the path leaves the address shorter
-  const used = match.parts.slice(0, segments.length)
-  if (used.length === segments.length && used.length > 0) {
-    const last = segments[segments.length - 1]!
+  const used = match.parts.slice()
+  if (used.length > 0) {
     if (match.route.isStatic) {
-      used[used.length - 1] = last.nodeName
-    } else if (!last.paramName && last.nodeName === 'index') {
+      used[used.length - 1] = segments[segments.length - 1]!.nodeName
+    } else if (isIndexPage(match.route)) {
       used.pop()
     }
   }

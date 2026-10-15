@@ -33,7 +33,7 @@ description: Access HTTP request details including method, headers, and query pa
 ### `canonicalPath`
 
 - Type: `string`
-- Description: The address of the page that serves the request. A page answers at more than one address: `pages/account/index.ejs` at `/account`, `/account/index` and `/account/index/anything`; `pages/dashboard.ejs` at `/dashboard` and everything below it. `canonicalPath` is `/account` or `/dashboard` for all of them (and `pathname` itself when no page serves the request). Rules about who may go where have to hold for it as well as for `pathname`, or `/account/index` would not be covered by a rule for `/account`. It follows `url` when a plugin replaces it.
+- Description: The address of the page that serves the request. Every page has one address, which a URL can still write with a trailing slash (`/account/`) or, for static files, with the fingerprinted name. `canonicalPath` is `/account` for `/account/` (and `pathname` itself when no page serves the request). Rules about who may go where have to hold for it as well as for `pathname`. It follows `url` when a plugin replaces it.
 
 ### `ip`
 

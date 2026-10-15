@@ -945,21 +945,21 @@ test('plugins can ask for the address of the page that serves the request', () =
   )
   for (const url of [
     '/account',
-    '/account/index',
-    '/account/index/x',
-    '/dashboard/anything',
+    '/account/',
+    '/dashboard',
     '/',
     '/api/health',
+    '/account/index',
   ]) {
     MiddlewareHandler(makeEvent(url).e)
   }
   expect(seen).toEqual({
     '/account': '/account',
-    '/account/index': '/account',
-    '/account/index/x': '/account',
-    '/dashboard/anything': '/dashboard',
+    '/account/': '/account',
+    '/dashboard': '/dashboard',
     '/': '/',
     '/api/health': '/api/health',
+    '/account/index': '/account/index',
   })
 })
 
@@ -988,8 +988,8 @@ test('the address of the page follows a plugin that rewrites the URL', () => {
       }),
     ]
   )
-  MiddlewareHandler(makeEvent('/es/admin/index').e)
-  expect(seen).toEqual(['/admin/index /admin'])
+  MiddlewareHandler(makeEvent('/es/admin/').e)
+  expect(seen).toEqual(['/admin/ /admin'])
 })
 
 test('the host is a header like any other', () => {

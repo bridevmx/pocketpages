@@ -7,54 +7,60 @@ globalThis.$filepath = {
 } as any
 
 /**
- * The routing algorithm as it was before the route index existed: sort every route by
- * specificity, then try them one by one. The index has to behave exactly like this.
+ * What routing is meant to do, written the slow way: every page has one address, which
+ * is the segments of its file, `index` left out. Routes with more literal segments win.
  */
 const referenceResolve = (pathname: string, routes: any[]) => {
-  const urlPath = pathname.slice(1)
-  const tryFnames = [urlPath || 'index']
-  if (tryFnames[0] !== 'index') {
-    tryFnames.push(`${urlPath}/index`)
+  if (pathname.includes('\\')) return null
+  let urlPath = pathname.slice(1)
+  if (urlPath.endsWith('/')) urlPath = urlPath.slice(0, -1)
+  if (
+    urlPath.startsWith('/') ||
+    urlPath.endsWith('/') ||
+    urlPath.includes('//')
+  )
+    return null
+  const urlParts = urlPath.split('/').filter((p) => p)
+
+  const specificity = (route: any) =>
+    route.segments.reduce(
+      (acc: number, segment: any) => acc + (segment.paramName ? 1 : 10),
+      0
+    )
+  const sortedRoutes = routes
+    .map((route, position) => ({ route, position }))
+    .sort(
+      (a, b) =>
+        specificity(b.route) - specificity(a.route) || a.position - b.position
+    )
+    .map((r) => r.route)
+
+  const isIndexPage = (route: any) => {
+    const last = route.segments[route.segments.length - 1]
+    return (
+      !!last && !route.isStatic && !last.paramName && last.nodeName === 'index'
+    )
   }
-  for (const maybeFname of tryFnames) {
-    const parts = $filepath
-      .toSlash(maybeFname)
-      .split('/')
-      .filter((p) => p)
 
-    const sortedRoutes = routes.slice().sort((a, b) => {
-      const getSpecificity = (route: any) =>
-        route.segments.reduce(
-          (acc: number, segment: any) => acc + (segment.paramName ? 1 : 10),
-          0
-        )
-      const aSpecificity = getSpecificity(a)
-      const bSpecificity = getSpecificity(b)
-      if (aSpecificity !== bSpecificity) {
-        return bSpecificity - aSpecificity
-      }
-      return 0
-    })
-
+  for (const asIndex of [false, true]) {
+    const parts = asIndex ? urlParts.concat('index') : urlParts
     for (const route of sortedRoutes) {
+      if (isIndexPage(route) !== asIndex) continue
+      if (route.segments.length !== parts.length) continue
       const matched = route.segments.every((segment: any, i: number) => {
-        const { nodeName, paramName } = segment
-        if (paramName) return true
-        const part = parts[i]
-        const matchesWithFingerprint = (() => {
-          if (i !== route.segments.length - 1) return false
-          if (!route.isStatic) return false
-          const fingerprinted = fingerprint(segment.nodeName, route.fingerprint)
-          return fingerprinted === parts[i]
-        })()
-        return nodeName === part || matchesWithFingerprint
+        if (segment.paramName) return true
+        const last = i === route.segments.length - 1
+        return (
+          segment.nodeName === parts[i] ||
+          (last &&
+            route.isStatic &&
+            fingerprint(segment.nodeName, route.fingerprint) === parts[i])
+        )
       })
       if (matched) {
         const params: Record<string, any> = {}
         route.segments.forEach((segment: any, i: number) => {
-          if (segment.paramName) {
-            params[segment.paramName] = parts[i]!
-          }
+          if (segment.paramName) params[segment.paramName] = parts[i]!
         })
         return { route, params }
       }
@@ -124,7 +130,7 @@ const makePath = (random: () => number, routes: any[]) => {
   return '/' + parts.join('/' + doubled) + trailing
 }
 
-test('the route index resolves exactly like the original algorithm', () => {
+test('the route index resolves exactly like the plain description of routing', () => {
   let checked = 0
   let matched = 0
   for (let seed = 1; seed <= 400; seed++) {
