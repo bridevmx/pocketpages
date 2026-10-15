@@ -8,14 +8,57 @@ import {
   compileRules,
   decideAll,
   Decision,
+  guardDecision,
+  GuardRule,
   misplacedPlugins,
-  rolesOf,
   safeNext,
   Subject,
+  subjectOfAuth,
 } from './rules'
 
 export { safeNext } from './rules'
-export type { AccessRule, Decision, Subject } from './rules'
+export type { AccessRule, Decision, GuardRule, Subject } from './rules'
+
+/**
+ * For the routes you register with PocketBase's `routerAdd()`, which PocketPages does not
+ * serve: the same roles as the rules of your pages. Call it in the handler or in a
+ * middleware, and it throws a 401, 403 or 404 (with `hide`) for whoever may not go on.
+ *
+ * ```js
+ * routerAdd('GET', '/api/myapp/reports', (e) => {
+ *   require('pocketpages-plugin-rbac').guard(e, { roles: ['admin'] })
+ *   return e.json(200, { ok: true })
+ * })
+ * ```
+ *
+ * PocketBase handlers can't see variables outside of them, so the rule is given to the
+ * function every time. Who is signed in comes from `e.auth`: PocketBase reads the token of
+ * the `Authorization` header, and nothing else.
+ */
+export const guard = (
+  e: core.RequestEvent,
+  rule: GuardRule,
+  roleField = 'role'
+): void => {
+  const decision = guardDecision(
+    subjectOfAuth(e.auth as never, roleField),
+    rule
+  )
+  switch (decision) {
+    case 'allow':
+      return
+    case 'unauthenticated':
+      throw new UnauthorizedError('Sign in required')
+    case 'hidden':
+      throw new NotFoundError()
+    default:
+      throw new ForbiddenError(
+        decision === 'unverified'
+          ? 'Email address not confirmed'
+          : 'Not allowed'
+      )
+  }
+}
 
 export type RbacOptions = PluginOptionsBase & {
   /** Who may go where. The first rule that covers a request decides. */
@@ -108,21 +151,8 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
     )
   }
 
-  const subjectOf = (request: PagesRequest): Subject => {
-    const auth = request.auth
-    if (!auth) return { signedIn: false, roles: [], verified: false }
-    let superuser = false
-    try {
-      superuser = auth.collection().name === '_superusers'
-    } catch {
-      // Not a record we can tell the collection of
-    }
-    return {
-      signedIn: true,
-      roles: rolesOf(auth.get(options.roleField), superuser),
-      verified: superuser || auth.get('verified') === true,
-    }
-  }
+  const subjectOf = (request: PagesRequest): Subject =>
+    subjectOfAuth(request.auth as never, options.roleField)
 
   /** Where the visitor is, as they asked for it */
   const hereOf = (request: PagesRequest) => {

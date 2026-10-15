@@ -132,6 +132,58 @@ export const rolesOf = (value: unknown, superuser: boolean): string[] => {
 }
 
 /**
+ * Who a signed in record is: its roles, and whether it has confirmed its email address.
+ * Works for the `request.auth` of pages and for the `e.auth` of PocketBase's own routes.
+ */
+export const subjectOfAuth = (
+  auth:
+    | {
+        get: (field: string) => unknown
+        collection: () => { name: string }
+      }
+    | null
+    | undefined,
+  roleField: string
+): Subject => {
+  if (!auth) return { signedIn: false, roles: [], verified: false }
+  let superuser = false
+  try {
+    superuser = auth.collection().name === '_superusers'
+  } catch {
+    // Not a record we can tell the collection of
+  }
+  return {
+    signedIn: true,
+    roles: rolesOf(auth.get(roleField), superuser),
+    verified: superuser || auth.get('verified') === true,
+  }
+}
+
+/** What a route of PocketBase can ask of whoever calls it */
+export type GuardRule = {
+  /** Signed in */
+  auth?: boolean
+  /** Signed in, with any of these roles */
+  roles?: string[]
+  /** Signed in, with a confirmed email address */
+  verified?: boolean
+  /** Answer 404 instead of 401 or 403 */
+  hide?: boolean
+}
+
+/**
+ * The error to throw for `subject` under `rule`, as a name of PocketBase's errors, or
+ * `undefined` when the request may go on.
+ */
+export const guardDecision = (
+  subject: Subject,
+  rule: GuardRule
+): Exclude<Decision, 'allow'> | 'allow' => {
+  const compiled = compileRules([{ path: '/', ...rule }], () => () => true)
+  return decide(compiled, subject, 'GET', '/')
+}
+
+/**
  * A place on this site that is safe to send visitors to after they sign in: a path, not
  * an address elsewhere. Redirecting to whatever `?next=` says is how sites end up
  * sending people to phishing pages.

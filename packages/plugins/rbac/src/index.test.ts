@@ -24,7 +24,7 @@ g.NotFoundError = class extends FakeError {
   }
 }
 
-const { default: factory } = await import('./index')
+const { default: factory, guard } = await import('./index')
 
 /** What the router makes of the URLs of the pages of these tests */
 const canonicalOf = (path: string) =>
@@ -554,4 +554,69 @@ test('listing the plugins in a bad order is an error, not a way around the rules
     make({}, ['pocketpages-plugin-i18n', 'pocketpages-plugin-rbac'])
   ).not.toThrow()
   expect(() => make({}, ['pocketpages-plugin-ejs'])).not.toThrow()
+})
+
+// --- routes of PocketBase
+
+const eventFor = (who: Who) =>
+  ({
+    auth: who && {
+      id: who.id,
+      get: (field: string) => who.fields?.[field],
+      collection: () => ({ name: who.collection ?? 'users' }),
+    },
+  }) as any
+
+const guarded = (
+  who: Who,
+  rule: Parameters<typeof guard>[1],
+  field?: string
+) => {
+  try {
+    guard(eventFor(who), rule, field)
+  } catch (e) {
+    return e as FakeError
+  }
+  return undefined
+}
+
+test('routes of PocketBase can ask for a sign in, a role or a confirmed email address', () => {
+  expect(guarded(undefined, { auth: true })).toMatchObject({ status: 401 })
+  expect(guarded(member, { auth: true })).toBeUndefined()
+  expect(guarded(undefined, { roles: ['admin'] })).toMatchObject({
+    status: 401,
+  })
+  expect(guarded(member, { roles: ['admin'] })).toMatchObject({ status: 403 })
+  expect(guarded(admin, { roles: ['editor', 'admin'] })).toBeUndefined()
+  const unconfirmed: Who = {
+    id: 'u3',
+    fields: { role: 'member', verified: false },
+  }
+  expect(guarded(unconfirmed, { verified: true })).toMatchObject({
+    status: 403,
+  })
+  expect(guarded(member, { verified: true })).toBeUndefined()
+})
+
+test('routes of PocketBase can hide that they exist', () => {
+  expect(guarded(undefined, { roles: ['admin'], hide: true })).toMatchObject({
+    status: 404,
+  })
+  expect(guarded(member, { roles: ['admin'], hide: true })).toMatchObject({
+    status: 404,
+  })
+  expect(guarded(admin, { roles: ['admin'], hide: true })).toBeUndefined()
+})
+
+test('superusers of PocketBase pass as superusers, and the field of the role can change', () => {
+  const superuser: Who = { id: 's1', collection: '_superusers' }
+  expect(guarded(superuser, { roles: ['superuser'] })).toBeUndefined()
+  expect(guarded(superuser, { verified: true })).toBeUndefined()
+  const staff: Who = { id: 'u4', fields: { rol: ['editor'] } }
+  expect(guarded(staff, { roles: ['editor'] }, 'rol')).toBeUndefined()
+  expect(guarded(staff, { roles: ['editor'] })).toMatchObject({ status: 403 })
+})
+
+test('a rule that asks for nothing is an error, not an open door', () => {
+  expect(() => guard(eventFor(admin), {})).toThrow('says nothing')
 })

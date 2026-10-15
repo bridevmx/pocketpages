@@ -143,6 +143,23 @@ module.exports = ({ rbac, params, auth }) => {
 
 `can()` only knows about the rules. A rule on a path decides who may open it, not which records they can read, and a check in the page for whatever is yours to protect (the posts of other users, say) stays your job. The best place for those rules is PocketBase's API rules, or the filters of your queries.
 
+## What PocketBase already does
+
+PocketBase does not know about the files in your `pages` folder: they are served by PocketPages, and that is what the rules above are for. For everything else it has its own tools, and you should use them:
+
+- **Records.** The API rules of a collection decide who can list, read, create, change and delete its records through the API. They are ignored for superusers, and for whatever your pages and loaders do with `$app`, which is why the filters of your queries stay your job.
+- **Routes you register with `routerAdd()`.** PocketBase's middlewares `$apis.requireAuth()`, `$apis.requireSuperuserAuth()` and `$apis.requireSuperuserOrOwnerAuth()` ask for a sign in. They know nothing about roles. For roles, a confirmed email address or a 404, this plugin has `guard()`, with the same words as the rules:
+
+```javascript
+// pb_hooks/reports.pb.js
+routerAdd('GET', '/api/myapp/reports', (e) => {
+  require('pocketpages-plugin-rbac').guard(e, { roles: ['admin'] })
+  return e.json(200, { ok: true })
+})
+```
+
+`guard(e, rule, roleField?)` takes `auth`, `roles`, `verified` and `hide` (see above) and throws a 401, a 403 or a 404. PocketBase handlers can't see the variables outside of them, so the rule goes in the call, and the plugin is `require`d inside the handler. Who is signed in is `e.auth`, which PocketBase fills from the `Authorization` header and from nothing else: the cookie of the auth plugin is for pages.
+
 ## About 401, 403 and 404
 
 `requireAuth()` and `requireRole()` throw PocketBase errors, which PocketPages turns into responses (see the [plugin authoring guide](/docs/plugins/authoring)). Visitors are redirected to the login page, as the rules do.
