@@ -16,6 +16,8 @@ type IndexedRoute = {
   route: Route
   /** Position in the specificity ordering, lower wins */
   order: number
+  /** A page named `index`, which answers for its folder: `docs/index.ejs` is `/docs` */
+  isIndex: boolean
 }
 
 /**
@@ -81,7 +83,7 @@ export const buildRouteIndex = (routes: Route[]): RouteIndex => {
 
   const root = newNode()
   sorted.forEach(({ route }, order) => {
-    const indexed: IndexedRoute = { route, order }
+    const indexed: IndexedRoute = { route, order, isIndex: isIndexPage(route) }
     const { segments } = route
     let node = root
     for (let i = 0; i < segments.length; i++) {
@@ -120,10 +122,11 @@ const splitPath = (path: string) => path.split('/').filter((p) => p)
 
 type Search = {
   parts: string[]
-  /** Whether the routes sought are the `index` pages (the last part is the added `index`) */
-  index: boolean
+  /** Best route whose segments are the parts of the path */
   best: IndexedRoute | undefined
   fingerprinted: boolean
+  /** Best `index` page of the folder the path names */
+  bestIndex: IndexedRoute | undefined
 }
 
 /** `docs/index.ejs`, which answers for `/docs` and never for `/docs/index` */
@@ -135,7 +138,6 @@ const isIndexPage = (route: Route) => {
 }
 
 const consider = (search: Search, candidate: IndexedRoute, via: boolean) => {
-  if (isIndexPage(candidate.route) !== search.index) return
   if (!search.best || candidate.order < search.best.order) {
     search.best = candidate
     search.fingerprinted = via
@@ -145,14 +147,28 @@ const consider = (search: Search, candidate: IndexedRoute, via: boolean) => {
 /**
  * Walks every way `parts` can be matched, keeping the most specific route found. A
  * route matches when its segments are the segments of the path, all of them: the path
- * can't have more, and `[param]` segments need a part to take.
+ * can't have more, and `[param]` segments need a part to take. At the end of the path,
+ * the `index` page of the folder it names matches too, but only when no other route does.
  */
 const visit = (search: Search, node: RouteNode, depth: number) => {
   const { parts } = search
   if (depth === parts.length) {
     if (node.routes) {
       for (let i = 0; i < node.routes.length; i++) {
-        consider(search, node.routes[i]!, false)
+        const candidate = node.routes[i]!
+        if (!candidate.isIndex) consider(search, candidate, false)
+      }
+    }
+    const folder = node.statics?.get('index')
+    if (folder?.routes) {
+      for (let i = 0; i < folder.routes.length; i++) {
+        const candidate = folder.routes[i]!
+        if (
+          candidate.isIndex &&
+          (!search.bestIndex || candidate.order < search.bestIndex.order)
+        ) {
+          search.bestIndex = candidate
+        }
       }
     }
     return
@@ -171,11 +187,7 @@ const visit = (search: Search, node: RouteNode, depth: number) => {
   if (node.param) visit(search, node.param, depth + 1)
 }
 
-const matchParts = (
-  index: RouteIndex,
-  parts: string[],
-  indexPage: boolean
-): RouteMatch | null => {
+const matchParts = (index: RouteIndex, parts: string[]): RouteMatch | null => {
   // Most requests that get here are not for a page. Nothing at the root can match them
   // when there is no [param] first segment and no route has the first segment of the
   // path as its own, so there is nothing to search.
@@ -183,8 +195,9 @@ const matchParts = (
   if (!root.param && !root.routes) {
     const first = parts[0]
     if (
-      first === undefined ||
-      (!root.statics?.has(first) && !root.fingerprinted?.has(first))
+      first === undefined
+        ? !root.statics?.has('index')
+        : !root.statics?.has(first) && !root.fingerprinted?.has(first)
     ) {
       return null
     }
@@ -192,16 +205,17 @@ const matchParts = (
 
   const search: Search = {
     parts,
-    index: indexPage,
     best: undefined,
     fingerprinted: false,
+    bestIndex: undefined,
   }
   visit(search, root, 0)
-  return search.best
+  const found = search.best ?? search.bestIndex
+  return found
     ? {
-        route: search.best.route,
+        route: found.route,
         parts,
-        fingerprinted: search.fingerprinted,
+        fingerprinted: search.best !== undefined && search.fingerprinted,
       }
     : null
 }
@@ -218,18 +232,14 @@ export const matchRoute = (
 ): RouteMatch | null => {
   if (pathname.indexOf('\\') !== -1) return null
   const urlPath = pathname.slice(1)
-  const trimmed = urlPath.endsWith('/') ? urlPath.slice(0, -1) : urlPath
-  if (
-    trimmed.indexOf('//') !== -1 ||
-    trimmed.startsWith('/') ||
-    trimmed.endsWith('/')
-  )
-    return null
-  const parts = splitPath(trimmed)
-  return (
-    matchParts(index, parts, false) ||
-    matchParts(index, parts.concat('index'), true)
-  )
+  // A trailing slash is ignored, but only one, and `//` is not a way to write `/`
+  const slash = urlPath.endsWith('/')
+  if (urlPath.indexOf('//') !== -1 || urlPath.startsWith('/')) return null
+  const parts = splitPath(urlPath)
+  const match = matchParts(index, parts)
+  // `/app.css/` is not a way to write the file: only pages are known by their folder
+  if (match && slash && match.route.isStatic) return null
+  return match
 }
 
 /**
@@ -246,8 +256,6 @@ export const canonicalPathOf = (match: RouteMatch): string => {
   if (used.length > 0) {
     if (match.route.isStatic) {
       used[used.length - 1] = segments[segments.length - 1]!.nodeName
-    } else if (isIndexPage(match.route)) {
-      used.pop()
     }
   }
   return '/' + used.join('/')

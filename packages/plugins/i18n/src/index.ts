@@ -357,7 +357,11 @@ const i18nPluginFactory: PluginFactory<I18nOptions> = (config, extra) => {
             safeToRedirect
           ) {
             // One address for each page
-            response.redirect(found.path + query, 301)
+            // Never to another site: one slash at the start, whatever the path was
+            response.redirect(
+              `/${found.path.replace(/^[/\\]+/, '')}${query}`,
+              301
+            )
             return true
           }
           request.url = globalApi.url(found.path + query)

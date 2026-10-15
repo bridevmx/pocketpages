@@ -321,7 +321,7 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
           ? path
           : $filepath.join(route.assetPrefix, path)
         const fullAssetPath = path.startsWith('/')
-          ? path
+          ? path.replace(/\\/g, '/').replace(/\/{2,}/g, '/')
           : $filepath.join(
               ...route.segments.slice(0, -2).map((s) => s.nodeName),
               route.assetPrefix,

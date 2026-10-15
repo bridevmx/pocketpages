@@ -12,14 +12,9 @@ globalThis.$filepath = {
  */
 const referenceResolve = (pathname: string, routes: any[]) => {
   if (pathname.includes('\\')) return null
-  let urlPath = pathname.slice(1)
-  if (urlPath.endsWith('/')) urlPath = urlPath.slice(0, -1)
-  if (
-    urlPath.startsWith('/') ||
-    urlPath.endsWith('/') ||
-    urlPath.includes('//')
-  )
-    return null
+  const urlPath = pathname.slice(1)
+  const slash = urlPath.endsWith('/')
+  if (urlPath.startsWith('/') || urlPath.includes('//')) return null
   const urlParts = urlPath.split('/').filter((p) => p)
 
   const specificity = (route: any) =>
@@ -62,6 +57,8 @@ const referenceResolve = (pathname: string, routes: any[]) => {
         route.segments.forEach((segment: any, i: number) => {
           if (segment.paramName) params[segment.paramName] = parts[i]!
         })
+        // `/app.css/` is not a way to write the file
+        if (slash && route.isStatic) return null
         return { route, params }
       }
     }

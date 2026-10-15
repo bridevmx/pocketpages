@@ -86,7 +86,7 @@ Every page answers at exactly one address, the one its file name says, and every
 | `pages/posts/[id].ejs`    | `/posts/5`                       | `/posts` (a `[param]` needs a value), `/posts/5/more` |
 | any                       | `/a/b`                           | `//a/b`, `/a//b` and `\` in the path                  |
 
-A static file also answers at its fingerprinted name (`/app.<sha256>.css`).
+A static file also answers at its fingerprinted name (`/app.<sha256>.css`), and never with a trailing slash (`/app.css/` is a 404).
 
 > **Breaking change.** Before, `/account/index`, anything after the address of a page (`/dashboard/anything`) and a `[param]` with nothing in it (`/posts` for `posts/[id].ejs`) were served by the same page. Now they are not. This closes the ways of reaching a page that a rule written for its address does not cover, and gives search engines and caches one URL per page. If your code relied on the old behaviour, give the page the segments it needs: a folder with an `index.ejs` and a `[param]` for each value you read from the path. There is no catch-all route.
 

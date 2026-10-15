@@ -70,6 +70,8 @@ test('empty segments and backslashes are not another way to write a path', () =>
   expect(matchRoute(index, '//account')).toBeNull()
   expect(matchRoute(index, '/account//')).toBeNull()
   expect(matchRoute(index, '/posts//5')).toBeNull()
+  expect(matchRoute(index, '//')).toBeNull()
+  expect(matchRoute(index, '/members/handbook.pdf/')).toBeNull()
   expect(matchRoute(index, '/posts\\5')).toBeNull()
   expect(matchRoute(index, '/\\account')).toBeNull()
 })
