@@ -872,11 +872,36 @@ test('a loader that redirects is the last word: the page is not rendered', () =>
   )
   const { e, seen } = makeEvent('/contact', 'POST')
   MiddlewareHandler(e)
-  expect(seen.redirects).toEqual([[302, '/thanks?__flash=']])
+  // No message was given, so the address is left exactly as it was
+  expect(seen.redirects).toEqual([[302, '/thanks']])
   expect(rendered).toEqual([])
   expect(seen.html).toEqual([])
   // No more loaders either
   expect(g.__postRan).toBe(false)
+})
+
+test('redirect() only adds __flash when a message is actually given', () => {
+  const withMessage = writeLoader(
+    '+load.js',
+    `module.exports = ({ redirect }) => { redirect('/thanks', { message: 'Saved' }); return {} }`
+  )
+  configure([renderer()], [page('silent', { loaders: { load: withMessage } })])
+  const { e: e1, seen: seen1 } = makeEvent('/silent')
+  MiddlewareHandler(e1)
+  expect(seen1.redirects).toEqual([[302, '/thanks?__flash=Saved']])
+
+  const emptyMessage = writeLoader(
+    '+load.js',
+    `module.exports = ({ redirect }) => { redirect('/thanks', { message: '' }); return {} }`
+  )
+  configure(
+    [renderer()],
+    [page('silent2', { loaders: { load: emptyMessage } })]
+  )
+  const { e: e2, seen: seen2 } = makeEvent('/silent2')
+  MiddlewareHandler(e2)
+  // message: '' was still given explicitly, so page-cache still knows to not keep it
+  expect(seen2.redirects).toEqual([[302, '/thanks?__flash=']])
 })
 
 test('a middleware that redirects keeps everything after it from running', () => {

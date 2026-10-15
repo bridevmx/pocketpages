@@ -306,7 +306,12 @@ export const MiddlewareHandler: PagesMiddlewareFunc = (e) => {
           ..._options,
         }
         const parsed = globalApi.url(path)
-        parsed.query.__flash = options.message
+        // Only a redirect that actually carries a message is for one visitor;
+        // a plain redirect() must stay the address the docs promise, and
+        // page-cache only bypasses caching for the ones that are marked.
+        if (_options?.message !== undefined) {
+          parsed.query.__flash = options.message
+        }
         response.redirect(parsed.toString(), options.status)
       },
       slot: '',
