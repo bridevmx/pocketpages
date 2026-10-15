@@ -155,6 +155,22 @@ Rules also apply to requests PocketBase answers itself, so `{ path: '/api/collec
 
 **Counters live in the memory of PocketBase**, shared by all of its JS runtimes, and are lost when it restarts. Counters of windows that are over are swept away.
 
+### PocketBase has a rate limiter too
+
+PocketBase (0.23 and newer) comes with one, and its [documentation](https://pocketbase.io/docs/going-to-production/) recommends turning it on in production: Dashboard > Settings > Application. Use it as the first line, and this plugin for what it does not do.
+
+|                           | PocketBase's                                                                                                                                                      | This plugin's                                                                     |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Rules live in             | the database, edited in the Dashboard                                                                                                                             | your `+config.js`, in the repository                                              |
+| A rule is for             | a tag (`*:auth`, `*:create`), the exact path (`/login`), `METHOD /path` (`POST /login`), or a prefix when it ends in `/`. Letters, digits, `_`, `-` and `/` only. | patterns with `*` and `**`, and a list of methods                                 |
+| Clients                   | counted by IP address. A rule can be only for guests (`@guest`) or only for signed in users (`@auth`).                                                            | by IP address, or by user                                                         |
+| Window                    | fixed                                                                                                                                                             | sliding                                                                           |
+| Other keys                | no                                                                                                                                                                | `rateLimit.hit()` and `enforce()` count anything: attempts per email address, say |
+| Other addresses of a page | the path of the URL only: `/login/index` is not `/login`                                                                                                          | the URL and the page that serves it                                               |
+| Never limited             | superusers, and the IPs you exclude                                                                                                                               |                                                                                   |
+
+Both can be on: a request has to be within the limits of each.
+
 ### Limiting anything
 
 Pages, loaders and middlewares get `rateLimit`:
@@ -173,7 +189,7 @@ module.exports = ({ body, rateLimit }) => {
 
 ## Security headers
 
-Sent with every page (not with static files, nor with PocketBase's own API):
+Sent with every page (not with static files, nor with PocketBase's own API). PocketBase sends `X-XSS-Protection`, `X-Content-Type-Options: nosniff` and `X-Frame-Options: SAMEORIGIN` with every response by itself; the first two defaults below are the same, and the rest is added by this plugin:
 
 | Header                                                       | Default                                          |
 | ------------------------------------------------------------ | ------------------------------------------------ |
