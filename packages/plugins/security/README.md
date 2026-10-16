@@ -116,7 +116,7 @@ This is why the plugin checks tokens late, once the auth plugin has run. Whichev
 
 Use `csrf: false` to turn it off altogether.
 
-**Behind a proxy** that does not pass the `Host` header on, set `X-Forwarded-Host` in the proxy, or list your public address in `trustedOrigins`.
+**Behind a proxy** that does not pass the `Host` header on, set `X-Forwarded-Host` in the proxy, or list your public address in `trustedOrigins`. `X-Forwarded-Host` is trusted as sent: only set it yourself, in a proxy that strips whatever a client sent for it first (any that doesn't already do this for every header it forwards has worse problems), or use `trustedOrigins` instead. Not behind a proxy at all, it should not be set anywhere, by you or by a client.
 
 **Method override.** Requests that a plugin turns into other methods (an HTML form can only send `GET` and `POST`) are checked with the method they end up as.
 
