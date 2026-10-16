@@ -182,24 +182,34 @@ const authPluginFactory: PluginFactory = (config) => {
         return
       }
       if (cookieRecordAuth?.token) {
+        let validAuthRecord: core.Record | undefined
         try {
-          const validAuthRecord = $app.findAuthRecordByToken(
-            cookieRecordAuth.token
-          )
-          if (!validAuthRecord) {
-            dbg(`invalid auth token found in cookie: ${cookieRecordAuth.token}`)
-            response.cookie('pb_auth', '', { maxAge: 0 })
-            return
-          }
-          $apis.enrichRecord(request.event, validAuthRecord)
-
-          // Attempt to use the record set during authWith* methods (these may be enriched)
-          request.auth = validAuthRecord
-          request.authToken = cookieRecordAuth.token
+          validAuthRecord = $app.findAuthRecordByToken(cookieRecordAuth.token)
         } catch (e) {
+          // The token itself, and only the token, decides whether this cookie signs
+          // somebody in: an unrelated failure here (PocketBase could not read the body,
+          // say, for a Content-Type it does not know) is not "this token is invalid",
+          // and must not sign the visitor out of a session that was good.
           dbg(`error fetching auth record: ${e}`)
           response.cookie('pb_auth', '', { maxAge: 0 })
+          return
         }
+        if (!validAuthRecord) {
+          dbg(`invalid auth token found in cookie: ${cookieRecordAuth.token}`)
+          response.cookie('pb_auth', '', { maxAge: 0 })
+          return
+        }
+        try {
+          $apis.enrichRecord(request.event, validAuthRecord)
+        } catch (e) {
+          // Enriching (expanding relations, hiding the email from who should not see
+          // it) can fail on its own; the record, and the sign in, are still good.
+          dbg(`could not enrich the auth record: ${e}`)
+        }
+
+        // Attempt to use the record set during authWith* methods (these may be enriched)
+        request.auth = validAuthRecord
+        request.authToken = cookieRecordAuth.token
       }
     },
     onExtendContextApi: ({ api }) => {
