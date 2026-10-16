@@ -321,7 +321,17 @@ const authPluginFactory: PluginFactory = (config) => {
         return authData as AuthData
       }
 
-      api.signOut = () => {
+      api.signOut = (options?: { everywhere?: boolean }) => {
+        // Clearing the cookie only logs this browser out. The token in it (anyone who
+        // copied it, not only this browser) still signs requests until it expires on its
+        // own, because PocketBase's auth tokens need nothing from the server to be valid.
+        // Rotating the record's token key makes every token issued for it, this one
+        // included, invalid right away: "sign out" then means what visitors expect it to.
+        if ((options?.everywhere ?? true) && api.request.auth) {
+          const record = api.request.auth as unknown as core.Record
+          record.refreshTokenKey()
+          $app.save(record)
+        }
         api.response.cookie(`pb_auth`, '', { maxAge: 0 })
       }
 

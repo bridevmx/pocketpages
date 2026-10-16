@@ -1,4 +1,5 @@
 import { stringify } from 'pocketbase-stringify'
+import { confine } from './confine'
 import { pathExists, readText } from './fs'
 import { runtime } from './runtime'
 import { ResolveOptions } from './types'
@@ -92,6 +93,10 @@ export const mkResolve =
     // Handle absolute paths (starting with /)
     if (path.startsWith('/')) {
       const finalPath = $filepath.join(pagesRoot, '_private', path)
+      // A path full of `..` could otherwise walk out of `_private`, even out of `pages`
+      if (!confine($filepath.join(pagesRoot, '_private'), finalPath)) {
+        throw new Error(`No module '${path}' found`)
+      }
       try {
         return _require(finalPath)
       } catch (e) {
@@ -108,12 +113,30 @@ export const mkResolve =
       }
     }
 
-    // Handle relative paths by searching up the directory tree
+    // `../x` skips as many levels of `_private` as it has `../`, then resolves `x` from
+    // there upward as usual. `_private/..` would otherwise cancel out when joined, so the
+    // path never looked in a `_private` directory at all (`_private/../x` is just `x`).
     let currentPath = rootPath
+    let searchPath = path
+    while (searchPath.startsWith('../') || searchPath === '..') {
+      if (currentPath === pagesRoot) {
+        throw new Error(
+          `No module '${path}' found: nothing is above '${pagesRoot}'`
+        )
+      }
+      currentPath = $filepath.dir(currentPath)
+      searchPath = searchPath === '..' ? '' : searchPath.slice(3)
+    }
+
+    // Handle relative paths by searching up the directory tree
     while (currentPath.length >= pagesRoot.length) {
       try {
-        const finalPath = $filepath.join(currentPath, '_private', path)
+        const finalPath = $filepath.join(currentPath, '_private', searchPath)
         // console.log(`finalPath`, finalPath)
+        // Same as for an absolute path: `_private` (and `pages`) is as far as `..` goes
+        if (!confine($filepath.join(currentPath, '_private'), finalPath)) {
+          throw new NotFoundError(`No module '${path}' found`)
+        }
         const result = _require(finalPath)
         if (runtime.cache) {
           resolvedCache.set(resolvedKey, finalPath)

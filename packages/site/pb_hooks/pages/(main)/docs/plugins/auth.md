@@ -123,8 +123,10 @@ function signInWithOAuth2(
 ): AuthData
 
 // Sign out
-function signOut(): void
+function signOut(options?: { everywhere?: boolean }): void
 ```
+
+`signOut()` also rotates the signed in user's token key and saves the record, so the token that was in the cookie (and any copy of it) stops working immediately, on every device, not only this one: PocketBase's auth tokens need nothing from the server to be checked, so a cleared cookie by itself does not stop them from being replayed until they expire on their own. Pass `{ everywhere: false }` to only clear this cookie and leave the user's other sessions alone.
 
 ### Email Verification
 
