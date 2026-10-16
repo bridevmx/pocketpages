@@ -8,6 +8,7 @@ import type {
   RenderContext,
 } from 'pocketpages'
 import { compileTemplate, withServerBlocks } from './compile'
+import { confine } from './confine'
 
 export type EjsPluginOptions = PluginOptionsBase & {
   extensions: string[]
@@ -155,7 +156,16 @@ const ejsPluinFactory: PluginFactory<EjsPluginOptions> = (config, extra) => {
     // Handle absolute paths (starting with /)
     if (isDirectory) {
       dbg(`ejs resolveInclude ${includePath} from ${templatePath} <dir>`)
-      return path.resolve(pagesRoot, includePath)
+      const attemptPath = path.resolve(pagesRoot, includePath)
+      // `includePath` can look absolute itself ("/etc/passwd", a Windows drive or a
+      // UNC path): resolving it against `pagesRoot` is not enough to keep it inside,
+      // because an absolute second argument replaces the first one instead of joining it.
+      if (!confine(pagesRoot, attemptPath)) {
+        throw new Error(
+          `No partial '${includePath}' found in any _private directory`
+        )
+      }
+      return attemptPath
     }
 
     const cacheKey = `${templatePath}\0${includePath}`
@@ -192,7 +202,9 @@ const ejsPluinFactory: PluginFactory<EjsPluginOptions> = (config, extra) => {
     const triedPaths: string[] = []
     while (currentPath.length >= pagesRoot.length) {
       const attemptPath = path.resolve(currentPath, `_private`, includePath)
-      if (!attemptPath.startsWith(pagesRoot)) {
+      // Not a plain prefix check: "pages" is a text prefix of a sibling directory
+      // like "pages-backup" too, which is not inside `pages` at all.
+      if (!confine(pagesRoot, attemptPath)) {
         dbg(`skipping ${attemptPath} in ${pagesRoot}`)
         break
       }
