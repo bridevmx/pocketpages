@@ -40,6 +40,15 @@ module.exports = {
 
 Add a field for the role to your users collection: a `select` field called `role` with the values you want (`admin`, `editor`...). A `select` field that accepts several values works too.
 
+**Then close that field to the API.** PocketBase's rules for a users collection let anybody register and every user edit their own record, so a `role` field that the rules do not mention can be set to `admin` through PocketBase's API (`POST /api/collections/users/records` with `{"role": "admin"}`, or a `PATCH` to your own record) and your rules would let them in. Set the rules of the users collection (Collection → API rules, or in a migration) to:
+
+```
+createRule: @request.body.role:isset = false
+updateRule: id = @request.auth.id && @request.body.role:isset = false
+```
+
+Visitors can still register and edit their profile, and nobody but a superuser (or your own code, which uses `$app`) can give a role. If your field has another name, use that name. The plugin looks at the `users` collection when the first request comes in and writes a warning to PocketBase's log if the rules say nothing about the field.
+
 ## Rules
 
 ```javascript

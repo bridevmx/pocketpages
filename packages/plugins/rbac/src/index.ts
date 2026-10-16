@@ -13,6 +13,7 @@ import {
   rolesSatisfy,
   Who,
 } from './memberships'
+import { roleFieldRisks } from './roleField'
 import {
   AccessRule,
   compileRules,
@@ -193,7 +194,13 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
     ? createMemberships(
         checkMembershipsOptions(extra.memberships),
         backend ?? jsvmBackend(),
-        (message) => dbg(message)
+        (message) => {
+          try {
+            $app.logger().warn(`pocketpages-plugin-rbac: ${message}`)
+          } catch {
+            dbg(message)
+          }
+        }
       )
     : undefined
   const rules = compileRules(
@@ -322,10 +329,40 @@ const rbacPluginFactory: PluginFactory<RbacOptions> = (config, extra) => {
     refuse(request, decision)
   }
 
+  /**
+   * The role is trusted, so it matters who can write it through PocketBase's API.
+   * Looked at once, the first time a request comes in, and only warned about.
+   */
+  let roleFieldChecked = false
+  const checkRoleField = () => {
+    if (roleFieldChecked) return
+    roleFieldChecked = true
+    try {
+      const users = $app.findCollectionByNameOrId('users')
+      const rule = (value: unknown) =>
+        value === null || value === undefined ? null : String(value)
+      const risks = roleFieldRisks(
+        {
+          name: 'users',
+          hasField: !!users.fields.getByName(options.roleField),
+          createRule: rule(users.createRule),
+          updateRule: rule(users.updateRule),
+        },
+        options.roleField
+      )
+      for (let i = 0; i < risks.length; i++) {
+        $app.logger().warn(`pocketpages-plugin-rbac: ${risks[i]}`)
+      }
+    } catch {
+      // No users collection, or nothing to look at
+    }
+  }
+
   return {
     name: 'rbac',
 
     onRequest: ({ request, route }) => {
+      checkRoleField()
       // Requests PocketPages does not serve are for PocketBase, and its own rules
       if (!route || rules.length === 0) return
       check(request)
