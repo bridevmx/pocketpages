@@ -150,7 +150,7 @@ module.exports = ({ rbac, params, auth }) => {
 | `rbac.requireRole(...roles)` | Throws a 401 if nobody is signed in, a 403 if the user has none of the roles                |
 | `rbac.loginUrl(next?)`       | The login address, with the page you are on (or `next`) as the page to come back to         |
 
-`can()` only knows about the rules. A rule on a path decides who may open it, not which records they can read, and a check in the page for whatever is yours to protect (the posts of other users, say) stays your job. The best place for those rules is PocketBase's API rules, or the filters of your queries.
+`can()` only knows about the rules. A rule on a path decides who may open it, not which records they can read, and a check in the page for whatever is yours to protect (the posts of other users, say) stays your job. The best place for those rules is PocketBase's API rules, checked by reading the record through [`pb({ request })`](/docs/plugins/js-sdk#reading-and-writing-records-tied-to-a-visitor) instead of `$app`, which does not look at them at all.
 
 ## Memberships
 
