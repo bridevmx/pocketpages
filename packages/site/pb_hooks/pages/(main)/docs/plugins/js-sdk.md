@@ -131,6 +131,39 @@ While using the raw JSVM API might be slightly more efficient, the PocketBase RE
 - Familiar JavaScript patterns and nomenclature
 - Rich ecosystem of examples and community support
 
+## Reading and writing records tied to a visitor
+
+`$app.findRecordById()`, `$app.findFirstRecordByFilter()` and the rest of the raw JSVM API run as `$app`: PocketBase's own API rules of the collection do not apply to them at all, not even to check who the request belongs to. The filter that keeps one visitor's data away from another is then wherever you wrote it in your own code, and whoever writes a page without that filter — `$app.findRecordById('orders', params.id)`, no more — has written a page that shows anybody's order to anybody who is signed in.
+
+```javascript
+// pages/account/orders/[id]/+load.js — wrong: $app ignores the collection's rules entirely
+module.exports = ({ params }) => ({
+  order: $app.findRecordById('orders', params.id),
+})
+```
+
+Measured against a real PocketBase, reading one record this way costs about 2.6 ms; nothing stops it from returning a record that belongs to someone else.
+
+**Read it through `pb({ request })` instead**, so the record's own `viewRule` (or `updateRule`, `deleteRule`) decides, exactly as it would for a request to the API:
+
+```javascript
+// pages/account/orders/[id]/+load.js
+module.exports = ({ pb, params, request }) => {
+  try {
+    const order = pb({ request }).collection('orders').getOne(params.id)
+    return { order }
+  } catch (e) {
+    throw new NotFoundError()
+  }
+}
+```
+
+A visitor who is not the order's owner gets exactly what the collection's `viewRule` says a stranger gets (usually a 404, PocketBase's own). The rule is the one you already wrote for the API, or the one you will write later when you add a mobile app that talks to the same collection directly: there is only one place it can be wrong. The cost is the one honest trade-off: about 4.0 ms measured the same way, roughly 1.3 ms more than the raw call, for not having to get the filter right by hand on every page that reads a record.
+
+Use the raw JSVM API freely for records nobody but your own code should ever reach (system collections, aggregates, batch jobs), and for public, unfiltered reads where there is nothing to protect. For anything a signed in visitor asks for by its own id, read it through the SDK: the collection's rule is checked, not reimplemented.
+
+If the extra round trip is measured and matters on a hot path, `$app.canAccessRecord(record, info, record.collection().viewRule)` (with `info = new RequestInfo(); info.auth = request.auth`) checks the very same rule against a record you already have, for about the cost of the raw call. It is still your job to call it; the SDK's advantage is that you cannot forget to.
+
 ## SDK References
 
 The plugin uses a special JSVM-compatible version of the PocketBase JS SDK that provides synchronous methods instead of async/await:

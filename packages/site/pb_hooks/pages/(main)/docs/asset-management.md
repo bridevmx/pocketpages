@@ -15,7 +15,7 @@ Place your static assets (images, CSS, JS, etc.) alongside the pages that use th
 pb_hooks/
   pages/
     feature/
-      index.md       # Your content
+      index.ejs      # Your content
       styles.css     # Feature-specific styles
       header.jpg     # Feature-specific image
     shared/
@@ -23,15 +23,6 @@ pb_hooks/
 ```
 
 ## Using Assets
-
-### In Markdown
-
-Use standard markdown syntax for images - paths are automatically resolved relative to the current file:
-
-```markdown
-![Logo](logo.png) # Local image
-![Header](/shared/logo.png) # Absolute path
-```
 
 ### In EJS Templates
 
@@ -45,7 +36,7 @@ Use the `asset()` helper to generate fingerprinted URLs:
 ## How It Works
 
 1. During startup, PocketPages generates content-based fingerprints for all static files
-2. The `asset()` helper and markdown images automatically generate fingerprinted URLs
+2. The `asset()` helper automatically generates fingerprinted URLs
 3. URLs are served with long-term cache headers for optimal performance
 
 ## Best Practices

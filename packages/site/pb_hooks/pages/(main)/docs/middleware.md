@@ -127,6 +127,7 @@ Middleware supports an optional second argument: `next`.
   - Middleware will **not** proceed unless `next()` is called.
   - The page route will only be rendered if `next()` is called all the way through the chain.
   - If you return early (without calling `next()`), execution stops, no further middleware or loaders (`+load`, `+get`, etc) will run, no plugin `onRender` will be called, and **no response will be sent**. You must manually send a response, e.g. `response.json(400, { error: 'Forbidden' })`.
+  - Middleware that calls `redirect()` stops the request the same way, with or without `next`: nothing after it runs.
 
 ### Example with `next`
 
@@ -196,7 +197,9 @@ Supported method-specific middleware files:
 - `+patch.js`
 - `+delete.js`
 
-These files follow the same hierarchical execution order as `+middleware.js`.
+Unlike `+middleware.js`, they do not cascade down the folders: like `+load.js`, only the file next to the page runs, after the middleware, and `+load.js` runs before it. A `HEAD` request runs what a `GET` runs (it is a `GET` without the body).
+
+A method loader is not the place for a check that has to hold for the whole page: it only runs for its own methods. Put those in `+middleware.js`, or in the rules of an access control plugin such as [RBAC](/docs/plugins/rbac).
 
 ## Reference
 

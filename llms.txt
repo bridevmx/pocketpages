@@ -47,14 +47,21 @@ Pocketpages runs as a PocketBase hook, inside the PocketPage JSVM which is power
 
 ## Official Plugins
 
-- [Plugins Overview](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/index.md): How the plugin system works
+- [Plugins Overview](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/index.md): How the plugin system works, and a good order for the official plugins
 - [Authentication](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/auth.md): Built-in auth plugin (login, logout, token refresh)
 - [Datastar](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/datastar.md): Datastar reactive UI integration
 - [EJS](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/ejs.md): EJS templating engine plugin
+- [Forms](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/forms.md): Parse and validate forms and uploads, PUT and DELETE from HTML forms
+- [i18n](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/i18n.md): Translations, plurals and the language in the address
 - [JS SDK](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/js-sdk.md): PocketBase JS SDK access inside templates
-- [Markdown](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/marked.md): Render Markdown content in pages
 - [Micro Dash](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/micro-dash.md): Lodash-compatible utility functions
+- [Page Cache](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/page-cache.md): Keep rendered pages in memory and serve them without running them
+- [Pagination](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/pagination.md): Page numbers, links and a nav bar
+- [RBAC](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/rbac.md): Protect pages by sign in, role and email verification
 - [Realtime](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/realtime.md): Server-sent events and realtime subscriptions
+- [Security](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/security.md): CSRF protection, rate limiting, security headers and CSP
+- [SEO](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/seo.md): Meta tags, Open Graph, JSON-LD, sitemap.xml, robots.txt and RSS feeds
+- [Session](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/session.md): Cookie sessions and flash messages
 - [Plugin Authoring](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/plugins/authoring.md): How to write your own plugin
 
 ## Global API Reference
@@ -62,6 +69,9 @@ Pocketpages runs as a PocketBase hook, inside the PocketPage JSVM which is power
 - [Overview](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/index.md): Globals available in all templates and scripts
 - [dbg / info / warn / error](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/log.md): Logging utilities
 - [env](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/env.md): Access environment variables
+- [secret / sign / unsign](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/secret.md): Keys and signatures that belong to your app
+- [pathMatcher](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/path-matcher.md): Match URL paths against patterns like /admin/**
+- [canonicalPath](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/canonical-path.md): The address of the page that serves a URL path
 - [store](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/store.md): Persistent key-value store
 - [stringify](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/stringify.md): JSON serialization helper
 - [url](https://raw.githubusercontent.com/benallfree/pocketpages/main/packages/site/pb_hooks/pages/(main)/docs/global-api/url.md): URL construction and parsing helpers

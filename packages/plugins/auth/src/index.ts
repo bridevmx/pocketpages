@@ -65,6 +65,14 @@ const toPlainObject = (value: any) => {
   return value
 }
 
+/** What PocketBase serves itself: its API (`/api/...`) and its admin UI (`/_/...`) */
+const isPocketBasePath = (pathname: string | undefined): boolean =>
+  !!pathname &&
+  (pathname === '/api' ||
+    pathname.startsWith('/api/') ||
+    pathname === '/_' ||
+    pathname.startsWith('/_/'))
+
 const authPluginFactory: PluginFactory = (config) => {
   const { globalApi } = config
   const { dbg, info } = globalApi
@@ -149,7 +157,12 @@ const authPluginFactory: PluginFactory = (config) => {
 
   return {
     name: 'auth',
-    onRequest: ({ request, response }) => {
+    onRequest: ({ request, response, route }) => {
+      // PocketBase's own API and admin UI know nothing of this cookie, so there is no
+      // point in validating it for them. Nothing else is skipped: a URL no route claims
+      // yet may be rewritten into a page by a plugin that comes later (`/es/account` ->
+      // `/account`), and static files can be protected by rules about who is signed in.
+      if (route === null && isPocketBasePath(request.pathname)) return
       const { auth } = request
       if (auth) {
         dbg(`skipping cookie auth because auth record already set: ${auth.id}`)
@@ -169,24 +182,34 @@ const authPluginFactory: PluginFactory = (config) => {
         return
       }
       if (cookieRecordAuth?.token) {
+        let validAuthRecord: core.Record | undefined
         try {
-          const validAuthRecord = $app.findAuthRecordByToken(
-            cookieRecordAuth.token
-          )
-          if (!validAuthRecord) {
-            dbg(`invalid auth token found in cookie: ${cookieRecordAuth.token}`)
-            response.cookie('pb_auth', '', { maxAge: 0 })
-            return
-          }
-          $apis.enrichRecord(request.event, validAuthRecord)
-
-          // Attempt to use the record set during authWith* methods (these may be enriched)
-          request.auth = validAuthRecord
-          request.authToken = cookieRecordAuth.token
+          validAuthRecord = $app.findAuthRecordByToken(cookieRecordAuth.token)
         } catch (e) {
+          // The token itself, and only the token, decides whether this cookie signs
+          // somebody in: an unrelated failure here (PocketBase could not read the body,
+          // say, for a Content-Type it does not know) is not "this token is invalid",
+          // and must not sign the visitor out of a session that was good.
           dbg(`error fetching auth record: ${e}`)
           response.cookie('pb_auth', '', { maxAge: 0 })
+          return
         }
+        if (!validAuthRecord) {
+          dbg(`invalid auth token found in cookie: ${cookieRecordAuth.token}`)
+          response.cookie('pb_auth', '', { maxAge: 0 })
+          return
+        }
+        try {
+          $apis.enrichRecord(request.event, validAuthRecord)
+        } catch (e) {
+          // Enriching (expanding relations, hiding the email from who should not see
+          // it) can fail on its own; the record, and the sign in, are still good.
+          dbg(`could not enrich the auth record: ${e}`)
+        }
+
+        // Attempt to use the record set during authWith* methods (these may be enriched)
+        request.auth = validAuthRecord
+        request.authToken = cookieRecordAuth.token
       }
     },
     onExtendContextApi: ({ api }) => {
@@ -308,7 +331,17 @@ const authPluginFactory: PluginFactory = (config) => {
         return authData as AuthData
       }
 
-      api.signOut = () => {
+      api.signOut = (options?: { everywhere?: boolean }) => {
+        // Clearing the cookie only logs this browser out. The token in it (anyone who
+        // copied it, not only this browser) still signs requests until it expires on its
+        // own, because PocketBase's auth tokens need nothing from the server to be valid.
+        // Rotating the record's token key makes every token issued for it, this one
+        // included, invalid right away: "sign out" then means what visitors expect it to.
+        if ((options?.everywhere ?? true) && api.request.auth) {
+          const record = api.request.auth as unknown as core.Record
+          record.refreshTokenKey()
+          $app.save(record)
+        }
         api.response.cookie(`pb_auth`, '', { maxAge: 0 })
       }
 

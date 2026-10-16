@@ -37,7 +37,6 @@ PocketPages is a modern web framework built on PocketBase that combines the simp
 - Private file handling
 - Form processing
 - Middleware support
-- Markdown processing
 - Environment variable management
 
 ## Developer Tools
@@ -52,7 +51,6 @@ PocketPages is a modern web framework built on PocketBase that combines the simp
 - HTMX support for dynamic updates
 - AlpineJS for client-side interactivity
 - TailwindCSS + DaisyUI for styling
-- Markdown with code highlighting
 
 ## Deployment Options
 

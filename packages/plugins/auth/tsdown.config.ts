@@ -6,6 +6,7 @@ export default defineConfig({
     index: 'src/index.ts',
   },
   format: ['cjs'],
+  target: 'es2020',
   clean: true,
   outDir: 'dist',
   onSuccess: onSuccess('auth'),

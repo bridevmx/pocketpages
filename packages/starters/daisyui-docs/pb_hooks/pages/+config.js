@@ -1,7 +1,4 @@
 module.exports = {
-  plugins: [
-    { name: 'pocketpages-plugin-ejs', extensions: ['.ejs', '.md'] },
-    'pocketpages-plugin-marked',
-  ],
+  plugins: [{ name: 'pocketpages-plugin-ejs', extensions: ['.ejs', '.md'] }],
   debug: false,
 }

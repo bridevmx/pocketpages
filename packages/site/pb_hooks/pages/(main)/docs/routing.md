@@ -75,6 +75,21 @@ pb_hooks/
   /products/reviews/latest -> pb_hooks/pages/products/reviews/latest.ejs
   ```
 
+## One Address per Page
+
+Every page answers at exactly one address, the one its file name says, and everything else is a 404 (PocketBase gets the request, which answers with its own 404):
+
+| File                      | Answers at                       | Is a 404                                              |
+| ------------------------- | -------------------------------- | ----------------------------------------------------- |
+| `pages/account/index.ejs` | `/account` (and `/account/`)     | `/account/index`, `/account/anything`                 |
+| `pages/dashboard.ejs`     | `/dashboard` (and `/dashboard/`) | `/dashboard/anything/at/all`                          |
+| `pages/posts/[id].ejs`    | `/posts/5`                       | `/posts` (a `[param]` needs a value), `/posts/5/more` |
+| any                       | `/a/b`                           | `//a/b`, `/a//b` and `\` in the path                  |
+
+A static file also answers at its fingerprinted name (`/app.<sha256>.css`), and never with a trailing slash (`/app.css/` is a 404).
+
+> **Breaking change.** Before, `/account/index`, anything after the address of a page (`/dashboard/anything`) and a `[param]` with nothing in it (`/posts` for `posts/[id].ejs`) were served by the same page. Now they are not. This closes the ways of reaching a page that a rule written for its address does not cover, and gives search engines and caches one URL per page. If your code relied on the old behaviour, give the page the segments it needs: a folder with an `index.ejs` and a `[param]` for each value you read from the path. There is no catch-all route.
+
 ## Organizing API Routes and Layouts
 
 When building applications that serve both full pages and API endpoints (especially with HTMX), it's important to properly organize your routes to prevent unwanted layout inheritance.

@@ -130,3 +130,7 @@ Environment variables can be set in various ways depending on your deployment en
 - [Environment Variables Documentation](/docs/global-api/env)
 - [Deployment Guide](/docs/deploying)
 - [Security Best Practices](/docs/security)
+
+## The Secret of PocketPages
+
+PocketPages and its plugins sign and encrypt things for you (sessions, CSRF tokens, signed links). They need a secret of their own, and by default they use one that never leaves the server: the secret PocketBase signs the tokens of superusers with. To use your own, set the `POCKETPAGES_SECRET` environment variable to at least 16 random characters. See [secret, sign and unsign](/docs/global-api/secret).

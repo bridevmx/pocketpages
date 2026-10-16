@@ -15,7 +15,7 @@ module.exports = {
     // Object format with configuration
     {
       name: 'pocketpages-plugin-ejs',
-      extensions: ['.ejs', '.md'],
+      extensions: ['.ejs', '.html'],
       debug: false,
     },
   ],
@@ -26,6 +26,15 @@ module.exports = {
 
 - **`extensions`**: Array of file extensions to process (default: `['.ejs']`)
 - **`debug`**: Enable debug output for the plugin (default: `false`)
+- **`cache`**: Compile each template once and remember where `include()`s were found, instead of reading and compiling the files again on every request (default: the `cache` setting in `+config.js`, which is `true` unless PocketBase runs with `--dev`)
+
+## Performance
+
+Templates are compiled the first time they are rendered and kept for as long as the app runs. This is by far the biggest saving when serving pages: reading and compiling a template takes longer than rendering it.
+
+- Edits to templates and partials show up after PocketBase restarts. PocketBase does this by itself when `pb_hooks` changes (`--hooksWatch`, on by default, except on Windows). With `--dev` nothing is kept, so edits show up on the next request.
+- Set `cache: false` on the plugin, or in `+config.js` to turn caching off for every plugin, if you change template files while the app is running and PocketBase is not restarting.
+- Large pages are rendered in linear time. The output of a template is assembled from a list of chunks instead of being appended to one ever-growing string, which in the PocketBase JavaScript runtime copies the whole string every time.
 
 ## Features
 
@@ -52,16 +61,16 @@ Includes are resolved by searching up the directory tree for `_private` director
 3. Repeat this process up the directory tree in `_private` folders
 
 ```ejs
-<!-- For example, include('header') with extensions: ['.ejs', '.md'] will search for: -->
+<!-- For example, include('header') with extensions: ['.ejs', '.html'] will search for: -->
 <!-- 1. ./current/dir/_private/header -->
 <!-- 2. ./current/dir/_private/header.ejs -->
-<!-- 3. ./current/dir/_private/header.md -->
+<!-- 3. ./current/dir/_private/header.html -->
 <!-- 4. ./parent/dir/_private/header -->
 <!-- 5. ./parent/dir/_private/header.ejs -->
-<!-- 6. ./parent/dir/_private/header.md -->
+<!-- 6. ./parent/dir/_private/header.html -->
 <!-- 7. ./root/_private/header -->
 <!-- 8. ./root/_private/header.ejs -->
-<!-- 9. ./root/_private/header.md -->
+<!-- 9. ./root/_private/header.html -->
 <%%- include('header', { title: 'My Page' }) %>
 ```
 
@@ -85,41 +94,11 @@ A convenient `echo()` function is provided for outputting content:
 %>
 ```
 
-## Usage with Markdown
-
-When configured with the `.md` extension, the plugin will process EJS templates within Markdown files:
-
-```javascript
-module.exports = {
-  plugins: [
-    {
-      name: 'pocketpages-plugin-ejs',
-      extensions: ['.ejs', '.md'],
-    },
-    'pocketpages-plugin-marked',
-  ],
-}
-```
-
-This allows you to use EJS features in your Markdown content:
-
-```ejs
-# Welcome <%%= user.name %>
-
-<<%=`script server`%>>
-  const posts = pb.collection('posts').getFullList()
-</script>
-
-<%% for (const post of posts) { %>
-- [<%%= post.title %>](<%%= post.url %>)
-<%% } %>
-```
-
 ## Default Configuration
 
 Since this plugin is included with PocketPages by default, you don't need to specify it in your `+config.js` unless you want to:
 
-1. Add additional file extensions (like `.md`)
+1. Add additional file extensions (like `.html`)
 2. Enable debug output
 3. Include it alongside other plugins
 

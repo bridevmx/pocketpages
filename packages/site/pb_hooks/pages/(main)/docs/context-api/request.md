@@ -23,7 +23,32 @@ description: Access HTTP request details including method, headers, and query pa
 ### `method`
 
 - Type: `'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'`
-- Description: The HTTP method of the request
+- Description: The HTTP method of the request. Plugins can change it (an HTML form can only send `GET` and `POST`, so the forms plugin turns a `POST` with a hidden `_method=DELETE` field into a `DELETE`). Loaders (`+post.js`, `+delete.js`...) are picked by it.
+
+### `pathname`
+
+- Type: `string`
+- Description: The path of the URL, `/blog/a-post`, without the query string. Cheaper than `url.pathname`, which has the whole URL parsed. It follows `url` when a plugin replaces it.
+
+### `canonicalPath`
+
+- Type: `string`
+- Description: The address of the page that serves the request. Every page has one address, which a URL can still write with a trailing slash (`/account/`) or, for static files, with the fingerprinted name. `canonicalPath` is `/account` for `/account/` (and `pathname` itself when no page serves the request). Rules about who may go where have to hold for it as well as for `pathname`. It follows `url` when a plugin replaces it.
+
+### `ip`
+
+- Type: `string`
+- Description: The address of the client, as PocketBase works it out: from the headers you list as trusted proxy headers in its settings (`X-Forwarded-For`...), and from the address of the connection when there are none. Behind a reverse proxy, list the header it sets, or every client has the address of the proxy. Don't list headers that clients can send themselves.
+
+### `secure`
+
+- Type: `boolean`
+- Description: True when the request came in over HTTPS, directly or through a proxy that says so with `X-Forwarded-Proto: https`
+
+### `state`
+
+- Type: `Record<string, any>`
+- Description: Room for plugins to leave things for each other, and for pages, during one request. Empty at the start of every request. Plugins use their own name as the key: `request.state.session`, `request.state.i18n`.
 
 ### `url`
 
@@ -43,7 +68,7 @@ description: Access HTTP request details including method, headers, and query pa
 ### `header()`
 
 - Type: `(name: string) => string`
-- Description: Function that returns the value of the specified request header. Returns empty string if header not found.
+- Description: Function that returns the value of the specified request header. Returns empty string if header not found. `header('Host')` works: the host of the request is not among the headers in Go, and PocketPages looks it up where it is.
 
 ### `cookies`
 

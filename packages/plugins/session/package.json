@@ -1,0 +1,26 @@
+{
+  "name": "pocketpages-plugin-session",
+  "version": "0.0.0",
+  "description": "Cookie sessions and flash messages for PocketPages",
+  "license": "MIT",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "test": "bun test"
+  },
+  "peerDependencies": {
+    "pocketpages": ">=0.23.0"
+  },
+  "devDependencies": {
+    "pocketbase-jsvm": "^0.25.10001",
+    "pocketpages": "workspace:>=0.22.3",
+    "tsdown": "^0.12.7",
+    "typescript": "^5.7.3"
+  },
+  "files": [
+    "dist",
+    "*.md"
+  ]
+}

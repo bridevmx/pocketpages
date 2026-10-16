@@ -17,13 +17,20 @@
     "publish:auth": "cd packages/plugins/auth && bun publish",
     "publish:ejs": "cd packages/plugins/ejs && bun publish",
     "publish:js-sdk": "cd packages/plugins/js-sdk && bun publish",
-    "publish:marked": "cd packages/plugins/marked && bun publish",
     "publish:micro-dash": "cd packages/plugins/micro-dash && bun publish",
     "publish:realtime": "cd packages/plugins/realtime && bun publish",
     "publish:create-pocketpages": "cd packages/create-pocketpages && bun publish",
     "publish:datastar": "cd packages/plugins/datastar && bun publish",
     "lint": "prettier --check .",
-    "lint:fix": "prettier --write ."
+    "lint:fix": "prettier --write .",
+    "publish:forms": "cd packages/plugins/forms && bun publish",
+    "publish:i18n": "cd packages/plugins/i18n && bun publish",
+    "publish:page-cache": "cd packages/plugins/page-cache && bun publish",
+    "publish:pagination": "cd packages/plugins/pagination && bun publish",
+    "publish:rbac": "cd packages/plugins/rbac && bun publish",
+    "publish:security": "cd packages/plugins/security && bun publish",
+    "publish:seo": "cd packages/plugins/seo && bun publish",
+    "publish:session": "cd packages/plugins/session && bun publish"
   },
   "prettier": {
     "singleQuote": true,

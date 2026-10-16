@@ -1,5 +1,7 @@
-import { fs } from 'pocketbase-node'
 import { stringify } from 'pocketbase-stringify'
+import { confine } from './confine'
+import { pathExists, readText } from './fs'
+import { runtime } from './runtime'
 import { ResolveOptions } from './types'
 
 export const pagesRoot = $filepath.join(__hooks, `pages`)
@@ -7,9 +9,23 @@ export const pagesRoot = $filepath.join(__hooks, `pages`)
 const SAFE_HEADER = `if (typeof module === 'undefined') { module = { exports: {} } };`
 const exts = ['', '.js', '.json']
 
+/**
+ * What resolve() already found out. Only used when `runtime.cache` is on, because the
+ * answers go stale if files appear or change while the app is running.
+ */
+const existsCache = new Set<string>()
+const resolvedCache = new Map<string, string>()
+const contentCache = new Map<string, string>()
+
 export const moduleExists = (path: string) => {
+  if (runtime.cache && existsCache.has(path)) return true
   for (let i = 0; i < exts.length; i++) {
-    if (fs.existsSync(path + exts[i])) {
+    // fileFromPath() succeeds for directories too
+    if (pathExists(path + exts[i])) {
+      // Only what exists is remembered: the paths asked about can come from the request
+      if (runtime.cache) {
+        existsCache.add(path)
+      }
       return true
     }
   }
@@ -19,12 +35,35 @@ export const moduleExists = (path: string) => {
 const simulateRequire = (path: string) => {
   for (let i = 0; i < exts.length; i++) {
     try {
-      return fs.readFileSync(path + exts[i], 'utf-8')
+      return readText(path + exts[i])
     } catch (e) {
       continue
     }
   }
   throw new Error(`No module '${path}' found`)
+}
+
+/**
+ * simulateRequire() for modules that are inlined into the page: they end up being read
+ * (and wrapped) on every request, so remember the result.
+ */
+const inline = (mode: 'raw' | 'script' | 'style', path: string) => {
+  const key = `${mode}\0${path}`
+  if (runtime.cache) {
+    const known = contentCache.get(key)
+    if (known !== undefined) return known
+  }
+  const source = simulateRequire(path)
+  const content =
+    mode === 'raw'
+      ? source
+      : mode === 'script'
+        ? `<script>\n${SAFE_HEADER}\n${source}\n</script>`
+        : `<style>\n${source}\n</style>`
+  if (runtime.cache) {
+    contentCache.set(key, content)
+  }
+  return content
 }
 
 class NotFoundError extends Error {
@@ -36,25 +75,28 @@ class NotFoundError extends Error {
 
 export const mkResolve =
   (rootPath: string) => (path: string, options?: Partial<ResolveOptions>) => {
+    const mode = options?.mode || 'require'
     const _require = (path: string) => {
       if (!moduleExists(path)) {
         throw new NotFoundError(`No module '${path}' found`)
       }
-      switch (options?.mode || 'require') {
+      switch (mode) {
         case 'raw':
-          return simulateRequire(path)
+        case 'script':
+        case 'style':
+          return inline(mode, path)
         case 'require':
           return require(path)
-        case 'script':
-          return `<script>\n${SAFE_HEADER}\n${simulateRequire(path)}\n</script>`
-        case 'style':
-          return `<style>\n${simulateRequire(path)}\n</style>`
       }
     }
 
     // Handle absolute paths (starting with /)
     if (path.startsWith('/')) {
       const finalPath = $filepath.join(pagesRoot, '_private', path)
+      // A path full of `..` could otherwise walk out of `_private`, even out of `pages`
+      if (!confine($filepath.join(pagesRoot, '_private'), finalPath)) {
+        throw new Error(`No module '${path}' found`)
+      }
       try {
         return _require(finalPath)
       } catch (e) {
@@ -62,13 +104,44 @@ export const mkResolve =
       }
     }
 
-    // Handle relative paths by searching up the directory tree
+    // The _private directory a relative path ends up in does not change between calls
+    const resolvedKey = `${rootPath}\0${path}`
+    if (runtime.cache) {
+      const finalPath = resolvedCache.get(resolvedKey)
+      if (finalPath !== undefined) {
+        return _require(finalPath)
+      }
+    }
+
+    // `../x` skips as many levels of `_private` as it has `../`, then resolves `x` from
+    // there upward as usual. `_private/..` would otherwise cancel out when joined, so the
+    // path never looked in a `_private` directory at all (`_private/../x` is just `x`).
     let currentPath = rootPath
+    let searchPath = path
+    while (searchPath.startsWith('../') || searchPath === '..') {
+      if (currentPath === pagesRoot) {
+        throw new Error(
+          `No module '${path}' found: nothing is above '${pagesRoot}'`
+        )
+      }
+      currentPath = $filepath.dir(currentPath)
+      searchPath = searchPath === '..' ? '' : searchPath.slice(3)
+    }
+
+    // Handle relative paths by searching up the directory tree
     while (currentPath.length >= pagesRoot.length) {
       try {
-        const finalPath = $filepath.join(currentPath, '_private', path)
+        const finalPath = $filepath.join(currentPath, '_private', searchPath)
         // console.log(`finalPath`, finalPath)
-        return _require(finalPath)
+        // Same as for an absolute path: `_private` (and `pages`) is as far as `..` goes
+        if (!confine($filepath.join(currentPath, '_private'), finalPath)) {
+          throw new NotFoundError(`No module '${path}' found`)
+        }
+        const result = _require(finalPath)
+        if (runtime.cache) {
+          resolvedCache.set(resolvedKey, finalPath)
+        }
+        return result
       } catch (e) {
         const errorMsg = `${e}`
         // console.log(`errorMsg`, errorMsg)

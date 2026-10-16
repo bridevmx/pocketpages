@@ -19,7 +19,9 @@ const baseRoute = (overrides = {}) => ({
 })
 
 test('matches index route', () => {
-  const routes = [baseRoute({ segments: [{ nodeName: 'index' }] })]
+  const routes = [
+    baseRoute({ segments: [{ nodeName: 'index' }], isStatic: false }),
+  ]
   const url = { pathname: '/', query: {} }
   const result = resolveRoute(url as any, routes as any)
   expect(result?.route.relativePath).toBe('index')

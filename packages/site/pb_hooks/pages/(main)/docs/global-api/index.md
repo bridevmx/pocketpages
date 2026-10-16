@@ -80,6 +80,16 @@ The Global API provides these core utility functions:
 
   - `env(key: string)` - Access environment variables
 
+- **Security**
+
+  - `secret(purpose: string)` - A key that belongs to your app, stable across restarts
+  - `sign(value: string)` / `unsign(signed: string)` - Signatures only your app can make
+
+- **Paths**
+
+  - `pathMatcher(patterns)` - A function that tells whether a URL path matches patterns like `/admin/**`
+  - `canonicalPath(pathname)` - The address of the page that serves a URL path (`/account` for `/account/index`)
+
 - **Logging**
   - `dbg()` - Debug level logging
   - `info()` - Info level logging
@@ -92,7 +102,6 @@ Many additional utilities are available through official plugins:
 
 - **@pocketpages-plugin/js-sdk**: PocketBase SDK client
 - **@pocketpages-plugin/micro-dash**: Lodash-like utilities
-- **@pocketpages-plugin/marked**: Markdown processing
 
 ## Using in Libraries
 
